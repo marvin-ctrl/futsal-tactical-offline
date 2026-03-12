@@ -1,0 +1,219 @@
+{
+  "meta": {
+    "id": "parity_fixture_half",
+    "name": "Parity Fixture Half",
+    "courtType": "half",
+    "schemaVersion": 2,
+    "createdAt": "2026-02-19T00:00:00.000Z",
+    "updatedAt": "2026-02-19T00:00:00.000Z"
+  },
+  "scenes": [
+    {
+      "id": "scene_parity_half",
+      "projectId": "parity_fixture_half",
+      "name": "Scene",
+      "orderIndex": 0,
+      "durationMs": 3000
+    }
+  ],
+  "keyframes": [
+    {
+      "id": "kf_start_half",
+      "sceneId": "scene_parity_half",
+      "timestampMs": 0,
+      "drawableState": {
+        "p1": {
+          "id": "p1",
+          "type": "player",
+          "x": 320,
+          "y": 340,
+          "rotation": -90,
+          "style": {
+            "stroke": "#111827",
+            "fill": "#2d6a4f",
+            "strokeWidth": 2,
+            "opacity": 1
+          }
+        },
+        "gk": {
+          "id": "gk",
+          "type": "goalkeeper",
+          "x": 480,
+          "y": 120,
+          "rotation": 90,
+          "style": {
+            "stroke": "#111827",
+            "fill": "#ef476f",
+            "strokeWidth": 2,
+            "opacity": 1
+          }
+        },
+        "ball": {
+          "id": "ball",
+          "type": "ball",
+          "x": 336,
+          "y": 322,
+          "rotation": 0,
+          "style": {
+            "stroke": "#111827",
+            "fill": "#f4d35e",
+            "strokeWidth": 1,
+            "opacity": 1
+          }
+        },
+        "arrow1": {
+          "id": "arrow1",
+          "type": "arrow",
+          "x": 330,
+          "y": 330,
+          "x2": 472,
+          "y2": 180,
+          "rotation": 0,
+          "width": 142,
+          "height": -150,
+          "style": {
+            "stroke": "#38bdf8",
+            "fill": "#38bdf8",
+            "strokeWidth": 3,
+            "opacity": 0.95,
+            "dashed": true
+          }
+        },
+        "line1": {
+          "id": "line1",
+          "type": "line",
+          "x": 240,
+          "y": 248,
+          "x2": 710,
+          "y2": 248,
+          "rotation": 0,
+          "width": 470,
+          "height": 0,
+          "style": {
+            "stroke": "#0ea5e9",
+            "fill": "#0ea5e9",
+            "strokeWidth": 2,
+            "opacity": 0.8,
+            "dashed": false
+          }
+        },
+        "zone1": {
+          "id": "zone1",
+          "type": "zone",
+          "x": 390,
+          "y": 150,
+          "x2": 570,
+          "y2": 260,
+          "rotation": 0,
+          "width": 180,
+          "height": 110,
+          "style": {
+            "stroke": "#d97706",
+            "fill": "#f59e0b",
+            "strokeWidth": 2,
+            "opacity": 0.22
+          }
+        }
+      }
+    },
+    {
+      "id": "kf_end_half",
+      "sceneId": "scene_parity_half",
+      "timestampMs": 3000,
+      "drawableState": {
+        "p1": {
+          "id": "p1",
+          "type": "player",
+          "x": 638,
+          "y": 260,
+          "rotation": -40,
+          "style": {
+            "stroke": "#111827",
+            "fill": "#2d6a4f",
+            "strokeWidth": 2,
+            "opacity": 1
+          }
+        },
+        "gk": {
+          "id": "gk",
+          "type": "goalkeeper",
+          "x": 500,
+          "y": 104,
+          "rotation": 90,
+          "style": {
+            "stroke": "#111827",
+            "fill": "#ef476f",
+            "strokeWidth": 2,
+            "opacity": 1
+          }
+        },
+        "ball": {
+          "id": "ball",
+          "type": "ball",
+          "x": 644,
+          "y": 242,
+          "rotation": 0,
+          "style": {
+            "stroke": "#111827",
+            "fill": "#f4d35e",
+            "strokeWidth": 1,
+            "opacity": 1
+          }
+        },
+        "arrow1": {
+          "id": "arrow1",
+          "type": "arrow",
+          "x": 640,
+          "y": 252,
+          "x2": 522,
+          "y2": 142,
+          "rotation": 0,
+          "width": -118,
+          "height": -110,
+          "style": {
+            "stroke": "#38bdf8",
+            "fill": "#38bdf8",
+            "strokeWidth": 3,
+            "opacity": 0.95,
+            "dashed": true
+          }
+        },
+        "line1": {
+          "id": "line1",
+          "type": "line",
+          "x": 350,
+          "y": 248,
+          "x2": 790,
+          "y2": 248,
+          "rotation": 0,
+          "width": 440,
+          "height": 0,
+          "style": {
+            "stroke": "#0ea5e9",
+            "fill": "#0ea5e9",
+            "strokeWidth": 2,
+            "opacity": 0.8,
+            "dashed": false
+          }
+        },
+        "zone1": {
+          "id": "zone1",
+          "type": "zone",
+          "x": 520,
+          "y": 128,
+          "x2": 700,
+          "y2": 236,
+          "rotation": 0,
+          "width": 180,
+          "height": 108,
+          "style": {
+            "stroke": "#d97706",
+            "fill": "#f59e0b",
+            "strokeWidth": 2,
+            "opacity": 0.22
+          }
+        }
+      }
+    }
+  ]
+}

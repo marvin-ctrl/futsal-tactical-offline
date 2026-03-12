@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark;
+  --bg: #08111e;
+  --bg-elevated: rgba(13, 28, 51, 0.88);
+  --bg-panel: rgba(6, 18, 38, 0.9);
+  --bg-panel-soft: rgba(18, 39, 68, 0.82);
+  --bg-button: rgba(23, 55, 99, 0.92);
+  --bg-button-hover: rgba(34, 76, 133, 0.96);
+  --bg-button-ghost: rgba(255, 255, 255, 0.06);
+  --bg-dock: rgba(4, 11, 24, 0.96);
+  --text: #f5f7fb;
+  --text-dim: #b9c6dd;
+  --line: rgba(158, 188, 236, 0.18);
+  --line-strong: rgba(158, 188, 236, 0.3);
+  --accent: #ffbf47;
+  --accent-ink: #152032;
+  --teal: #84e4ff;
+  --danger: #ff7a7a;
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 12px 30px rgba(0, 0, 0, 0.28);
+  --radius-lg: 22px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --space-1: 0.35rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --font-body: "Avenir Next", "Segoe UI", sans-serif;
+  --font-display: "Avenir Next Condensed", "Segoe UI", sans-serif;
+}
