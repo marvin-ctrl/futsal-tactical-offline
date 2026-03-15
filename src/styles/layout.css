@@ -34,6 +34,7 @@ select:focus-visible {
 
 .app-frame {
   position: relative;
+  height: 100vh;
   min-height: 100vh;
   padding: var(--space-4);
   display: grid;
@@ -66,8 +67,13 @@ select:focus-visible {
   grid-column: 1 / -1;
 }
 
+.app-frame__bottom {
+  grid-column: 1 / -1;
+}
+
 .app-frame__center {
   min-height: 0;
+  overflow: auto;
 }
 
 .viewport-compact {

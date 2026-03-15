@@ -142,12 +142,13 @@ button:disabled {
 }
 
 .side-rail {
-  min-height: 100%;
+  min-height: 0;
   padding: var(--space-3);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   gap: var(--space-3);
+  overflow: auto;
 }
 
 .side-rail__stack,
@@ -189,9 +190,10 @@ button:disabled {
 }
 
 .inspector-shell {
-  min-height: 100%;
+  min-height: 0;
   padding: var(--space-4);
   align-content: start;
+  overflow: auto;
 }
 
 .inspector-shell__tabs,
@@ -308,11 +310,45 @@ button:disabled {
   width: 100%;
 }
 
+.keyframe-lane {
+  position: relative;
+  height: 18px;
+}
+
+.keyframe-lane__track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(132, 228, 255, 0.18);
+}
+
+.keyframe-marker {
+  position: absolute;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(132, 228, 255, 0.28);
+  background: rgba(7, 17, 34, 0.95);
+  box-shadow: 0 0 0 2px rgba(7, 17, 34, 0.92);
+}
+
+.keyframe-marker.is-active {
+  background: var(--accent);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
 .stage-shell {
-  min-height: 100%;
+  min-height: 0;
   padding: var(--space-5);
   display: grid;
   gap: var(--space-4);
+  align-content: start;
   background:
     linear-gradient(180deg, rgba(17, 41, 77, 0.84) 0%, rgba(7, 17, 34, 0.92) 100%),
     radial-gradient(circle at top, rgba(255, 255, 255, 0.06), transparent 38%);
@@ -391,6 +427,25 @@ button:disabled {
 
 input[type="range"] {
   accent-color: var(--accent);
+}
+
+@media (max-height: 820px) {
+  .side-rail {
+    padding: var(--space-2);
+    gap: var(--space-2);
+  }
+
+  .side-rail__stack {
+    gap: var(--space-2);
+  }
+
+  .rail-button {
+    padding: 0.72rem 0.65rem;
+  }
+
+  .rail-button__hint {
+    display: none;
+  }
 }
 
 .viewport-fallback .command-bar,

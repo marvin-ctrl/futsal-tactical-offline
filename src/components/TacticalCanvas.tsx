@@ -7,9 +7,26 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { drawTacticalFrame } from "../lib/canvasRenderer";
-import { createId } from "../lib/projectSchema";
+import {
+  MIN_DRAW_DISTANCE,
+  MOVE_THRESHOLD,
+  buildCommittedDrawable,
+  buildPreviewDrawable,
+  collectDrawablesInRect,
+  constrainDragDelta,
+  createPlacementDrawable,
+  getDrawableBounds,
+  hitTestDrawables,
+  moveDrawableChanges,
+  normalizeDrawPoint,
+  offsetDrawable,
+  resolveMovableSelection,
+  toggleSelection,
+  type CanvasSize,
+  type Point
+} from "../lib/editorInteractions";
 import { sampleTimelineAt } from "../lib/timeline";
-import type { Drawable, DrawableType, TacticalProject, UUID } from "../types/domain";
+import type { Drawable, TacticalProject, UUID } from "../types/domain";
 import type { ActiveTool, EditorCommand } from "../types/ui";
 
 interface TacticalCanvasProps {
@@ -25,11 +42,6 @@ interface TacticalCanvasProps {
   onAutoPause?: () => void;
 }
 
-interface Point {
-  x: number;
-  y: number;
-}
-
 type InteractionState =
   | { mode: "idle" }
   | { mode: "placing"; tool: ActiveTool; point: Point }
@@ -37,8 +49,6 @@ type InteractionState =
   | { mode: "dragging"; start: Point; current: Point; ids: UUID[] }
   | { mode: "drawing"; tool: "arrow" | "line" | "zone"; start: Point; current: Point };
 
-const MIN_DRAW_DISTANCE = 6;
-const MOVE_THRESHOLD = 3;
 const DEFAULT_TOOL: ActiveTool = "select";
 
 export function TacticalCanvas({
@@ -67,13 +77,20 @@ export function TacticalCanvas({
     let drawables = sampledState.drawables;
 
     if (interaction.mode === "dragging") {
-      const deltaX = interaction.current.x - interaction.start.x;
-      const deltaY = interaction.current.y - interaction.start.y;
+      const delta = constrainDragDelta(
+        sampledState.drawables,
+        interaction.ids,
+        {
+          x: interaction.current.x - interaction.start.x,
+          y: interaction.current.y - interaction.start.y
+        },
+        canvasSize
+      );
       drawables = drawables.map((drawable) => {
         if (!interaction.ids.includes(drawable.id)) {
           return drawable;
         }
-        return offsetDrawable(drawable, deltaX, deltaY);
+        return offsetDrawable(drawable, delta);
       });
     }
 
@@ -85,7 +102,7 @@ export function TacticalCanvas({
     }
 
     return drawables;
-  }, [interaction, sampledState.drawables]);
+  }, [canvasSize, interaction, sampledState.drawables]);
 
   useLayoutEffect(() => {
     if (fixedWidth && fixedHeight) {
@@ -159,18 +176,21 @@ export function TacticalCanvas({
     if (activeTool === "select") {
       const hit = hitTestDrawables(sampledState.drawables, point);
       if (hit) {
-        const nextSelection = event.shiftKey
-          ? toggleSelection(selectedIds, hit.id)
-          : selectedIds.includes(hit.id)
-            ? selectedIds
-            : [hit.id];
+        if (event.shiftKey) {
+          onSelectIds?.(toggleSelection(selectedIds, hit.id));
+          setInteraction({ mode: "idle" });
+          return;
+        }
+
+        const nextSelection = selectedIds.includes(hit.id) ? selectedIds : [hit.id];
+        const moveIds = resolveMovableSelection(sampledState.drawables, nextSelection);
         onSelectIds?.(nextSelection);
-        if (nextSelection.includes(hit.id)) {
+        if (!hit.locked && moveIds.includes(hit.id)) {
           setInteraction({
             mode: "dragging",
             start: point,
             current: point,
-            ids: nextSelection
+            ids: moveIds
           });
         }
         return;
@@ -250,9 +270,16 @@ export function TacticalCanvas({
     }
 
     if (interaction.mode === "dragging") {
-      const deltaX = point.x - interaction.start.x;
-      const deltaY = point.y - interaction.start.y;
-      if (Math.hypot(deltaX, deltaY) >= MOVE_THRESHOLD && interaction.ids.length > 0) {
+      const delta = constrainDragDelta(
+        sampledState.drawables,
+        interaction.ids,
+        {
+          x: point.x - interaction.start.x,
+          y: point.y - interaction.start.y
+        },
+        canvasSize
+      );
+      if (Math.hypot(delta.x, delta.y) >= MOVE_THRESHOLD && interaction.ids.length > 0) {
         onCommand?.(
           {
             type: "updateDrawables",
@@ -260,7 +287,7 @@ export function TacticalCanvas({
               const drawable = sampledState.drawables.find((candidate) => candidate.id === id);
               return {
                 id,
-                changes: drawable ? moveDrawableChanges(drawable, deltaX, deltaY, canvasSize) : {}
+                changes: drawable ? moveDrawableChanges(drawable, delta) : {}
               };
             })
           },
@@ -274,8 +301,11 @@ export function TacticalCanvas({
     }
 
     if (interaction.mode === "drawing") {
-      if (Math.hypot(point.x - interaction.start.x, point.y - interaction.start.y) >= MIN_DRAW_DISTANCE) {
-        const drawable = buildCommittedDrawable(interaction.tool, interaction.start, point);
+      const endPoint = normalizeDrawPoint(interaction.start, point, event.shiftKey);
+      if (
+        Math.hypot(endPoint.x - interaction.start.x, endPoint.y - interaction.start.y) >= MIN_DRAW_DISTANCE
+      ) {
+        const drawable = buildCommittedDrawable(interaction.tool, interaction.start, endPoint);
         onCommand?.(
           {
             type: "addDrawables",
@@ -303,6 +333,7 @@ export function TacticalCanvas({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={() => setInteraction({ mode: "idle" })}
       />
       <p className="tactical-preview-meta">
         Scene: {sampledState.activeSceneName || "-"} ({Math.round(sampledState.localTimestampMs)} ms)
@@ -314,7 +345,7 @@ export function TacticalCanvas({
 function resolveCanvasPoint(
   event: ReactPointerEvent<HTMLCanvasElement>,
   canvas: HTMLCanvasElement | null,
-  canvasSize: { width: number; height: number }
+  canvasSize: CanvasSize
 ): Point | null {
   if (!canvas) {
     return null;
@@ -326,21 +357,17 @@ function resolveCanvasPoint(
   };
 }
 
-function toggleSelection(selectedIds: UUID[], id: UUID): UUID[] {
-  return selectedIds.includes(id) ? selectedIds.filter((selectedId) => selectedId !== id) : [...selectedIds, id];
-}
-
 function commitPlacement(
   tool: ActiveTool,
   point: Point,
   onCommand: TacticalCanvasProps["onCommand"],
   onSelectIds: TacticalCanvasProps["onSelectIds"]
 ) {
-  if (tool === "select" || tool === "arrow" || tool === "line" || tool === "zone") {
+  const drawable = createPlacementDrawable(tool, point);
+  if (!drawable) {
     return;
   }
 
-  const drawable = baseDrawable(tool, point);
   onCommand?.(
     {
       type: "addDrawables",
@@ -352,196 +379,6 @@ function commitPlacement(
     }
   );
   onSelectIds?.([drawable.id]);
-}
-
-function buildPreviewDrawable(tool: "arrow" | "line" | "zone", start: Point, end: Point): Drawable {
-  return buildCommittedDrawable(tool, start, end, "preview");
-}
-
-function buildCommittedDrawable(
-  tool: "arrow" | "line" | "zone",
-  start: Point,
-  end: Point,
-  idPrefix: string = tool
-): Drawable {
-  const base = baseDrawable(tool, start, createId(idPrefix));
-  return {
-    ...base,
-    x2: end.x,
-    y2: end.y,
-    width: end.x - start.x,
-    height: end.y - start.y
-  };
-}
-
-function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Drawable {
-  const id = explicitId ?? createId(type);
-  switch (type) {
-    case "goalkeeper":
-      return {
-        id,
-        type,
-        x: point.x,
-        y: point.y,
-        rotation: 0,
-        width: 28,
-        height: 28,
-        label: "GK",
-        style: {
-          stroke: "#08131f",
-          fill: "#ff6b6b",
-          strokeWidth: 2,
-          opacity: 1
-        }
-      };
-    case "ball":
-      return {
-        id,
-        type,
-        x: point.x,
-        y: point.y,
-        rotation: 0,
-        width: 12,
-        height: 12,
-        style: {
-          stroke: "#0f172a",
-          fill: "#ffe082",
-          strokeWidth: 1,
-          opacity: 1
-        }
-      };
-    case "cone":
-      return {
-        id,
-        type,
-        x: point.x,
-        y: point.y,
-        rotation: 0,
-        width: 12,
-        height: 12,
-        style: {
-          stroke: "#8a4b08",
-          fill: "#ff9f1c",
-          strokeWidth: 2,
-          opacity: 1
-        }
-      };
-    case "arrow":
-      return {
-        id,
-        type,
-        x: point.x,
-        y: point.y,
-        rotation: 0,
-        width: 100,
-        height: 0,
-        style: {
-          stroke: "#6ee7ff",
-          fill: "#6ee7ff",
-          strokeWidth: 3,
-          opacity: 0.95,
-          dashed: true
-        }
-      };
-    case "line":
-      return {
-        id,
-        type,
-        x: point.x,
-        y: point.y,
-        rotation: 0,
-        width: 100,
-        height: 0,
-        style: {
-          stroke: "#f8fafc",
-          fill: "#f8fafc",
-          strokeWidth: 3,
-          opacity: 0.95
-        }
-      };
-    case "zone":
-      return {
-        id,
-        type,
-        x: point.x,
-        y: point.y,
-        rotation: 0,
-        width: 120,
-        height: 70,
-        label: "Zone",
-        style: {
-          stroke: "#f59e0b",
-          fill: "#fbbf24",
-          strokeWidth: 2,
-          opacity: 0.2
-        }
-      };
-    case "label":
-      return {
-        id,
-        type,
-        x: point.x,
-        y: point.y,
-        rotation: 0,
-        label: "Note",
-        style: {
-          stroke: "#d7f6ff",
-          fill: "#14b8a6",
-          strokeWidth: 2,
-          opacity: 0.95
-        }
-      };
-    case "player":
-    default:
-      return {
-        id,
-        type: type === "player" ? "player" : "player",
-        x: point.x,
-        y: point.y,
-        rotation: 0,
-        width: 28,
-        height: 28,
-        label: "P",
-        style: {
-          stroke: "#08131f",
-          fill: "#0f2b63",
-          strokeWidth: 2,
-          opacity: 1
-        }
-      };
-  }
-}
-
-function offsetDrawable(drawable: Drawable, deltaX: number, deltaY: number): Drawable {
-  return {
-    ...drawable,
-    x: drawable.x + deltaX,
-    y: drawable.y + deltaY,
-    x2: drawable.x2 !== undefined ? drawable.x2 + deltaX : drawable.x2,
-    y2: drawable.y2 !== undefined ? drawable.y2 + deltaY : drawable.y2
-  };
-}
-
-function moveDrawableChanges(
-  drawable: Drawable,
-  deltaX: number,
-  deltaY: number,
-  canvasSize: { width: number; height: number }
-): Partial<Drawable> {
-  const nextX = clamp(drawable.x + deltaX, 0, canvasSize.width);
-  const nextY = clamp(drawable.y + deltaY, 0, canvasSize.height);
-  const change: Partial<Drawable> = {
-    x: nextX,
-    y: nextY
-  };
-
-  if (drawable.x2 !== undefined) {
-    change.x2 = clamp(drawable.x2 + deltaX, 0, canvasSize.width);
-  }
-  if (drawable.y2 !== undefined) {
-    change.y2 = clamp(drawable.y2 + deltaY, 0, canvasSize.height);
-  }
-  return change;
 }
 
 function drawSelectionOverlay(
@@ -563,7 +400,7 @@ function drawSelectionOverlay(
     if (!selectedIds.includes(drawable.id)) {
       continue;
     }
-    const bounds = getDrawableBounds(drawable);
+    const bounds = getDrawableBounds(drawable, 6);
     context.fillRect(bounds.left, bounds.top, bounds.width, bounds.height);
     context.strokeRect(bounds.left, bounds.top, bounds.width, bounds.height);
   }
@@ -584,139 +421,6 @@ function drawMarqueeOverlay(context: CanvasRenderingContext2D, start: Point, end
   context.fillRect(left, top, width, height);
   context.strokeRect(left, top, width, height);
   context.restore();
-}
-
-function collectDrawablesInRect(drawables: Drawable[], start: Point, end: Point): UUID[] {
-  const left = Math.min(start.x, end.x);
-  const right = Math.max(start.x, end.x);
-  const top = Math.min(start.y, end.y);
-  const bottom = Math.max(start.y, end.y);
-
-  return drawables
-    .filter((drawable) => {
-      const bounds = getDrawableBounds(drawable);
-      return (
-        bounds.left >= left &&
-        bounds.top >= top &&
-        bounds.left + bounds.width <= right &&
-        bounds.top + bounds.height <= bottom
-      );
-    })
-    .map((drawable) => drawable.id);
-}
-
-function hitTestDrawables(drawables: Drawable[], point: Point): Drawable | null {
-  const ordered = [...drawables].reverse();
-  for (const drawable of ordered) {
-    if (isPointInsideDrawable(drawable, point)) {
-      return drawable;
-    }
-  }
-  return null;
-}
-
-function isPointInsideDrawable(drawable: Drawable, point: Point): boolean {
-  switch (drawable.type) {
-    case "player":
-    case "goalkeeper":
-    case "ball":
-    case "cone": {
-      const radius = Math.max(drawable.width ?? 24, drawable.height ?? 24) * 0.5;
-      return Math.hypot(point.x - drawable.x, point.y - drawable.y) <= radius + 4;
-    }
-    case "label": {
-      const bounds = getDrawableBounds(drawable);
-      return point.x >= bounds.left && point.x <= bounds.left + bounds.width && point.y >= bounds.top && point.y <= bounds.top + bounds.height;
-    }
-    case "zone": {
-      const bounds = getDrawableBounds(drawable);
-      return point.x >= bounds.left && point.x <= bounds.left + bounds.width && point.y >= bounds.top && point.y <= bounds.top + bounds.height;
-    }
-    case "arrow":
-    case "line": {
-      const endX = drawable.x2 ?? drawable.x + (drawable.width ?? 0);
-      const endY = drawable.y2 ?? drawable.y + (drawable.height ?? 0);
-      return distanceToSegment(point, { x: drawable.x, y: drawable.y }, { x: endX, y: endY }) <= 10;
-    }
-    default:
-      return false;
-  }
-}
-
-function getDrawableBounds(drawable: Drawable) {
-  switch (drawable.type) {
-    case "player":
-    case "goalkeeper":
-    case "ball":
-    case "cone": {
-      const radius = Math.max(drawable.width ?? 24, drawable.height ?? 24) * 0.5;
-      return {
-        left: drawable.x - radius - 6,
-        top: drawable.y - radius - 6,
-        width: radius * 2 + 12,
-        height: radius * 2 + 12
-      };
-    }
-    case "label":
-      return {
-        left: drawable.x - 8,
-        top: drawable.y - 20,
-        width: Math.max((drawable.label?.length ?? 4) * 8, 48),
-        height: 28
-      };
-    case "zone": {
-      const endX = drawable.x2 ?? drawable.x + (drawable.width ?? 0);
-      const endY = drawable.y2 ?? drawable.y + (drawable.height ?? 0);
-      return {
-        left: Math.min(drawable.x, endX),
-        top: Math.min(drawable.y, endY),
-        width: Math.abs(endX - drawable.x),
-        height: Math.abs(endY - drawable.y)
-      };
-    }
-    case "arrow":
-    case "line": {
-      const endX = drawable.x2 ?? drawable.x + (drawable.width ?? 0);
-      const endY = drawable.y2 ?? drawable.y + (drawable.height ?? 0);
-      return {
-        left: Math.min(drawable.x, endX) - 8,
-        top: Math.min(drawable.y, endY) - 8,
-        width: Math.abs(endX - drawable.x) + 16,
-        height: Math.abs(endY - drawable.y) + 16
-      };
-    }
-    default:
-      return {
-        left: drawable.x - 12,
-        top: drawable.y - 12,
-        width: 24,
-        height: 24
-      };
-  }
-}
-
-function normalizeDrawPoint(start: Point, point: Point, axisLock: boolean): Point {
-  if (!axisLock) {
-    return point;
-  }
-  const deltaX = point.x - start.x;
-  const deltaY = point.y - start.y;
-  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
-    return { x: point.x, y: start.y };
-  }
-  return { x: start.x, y: point.y };
-}
-
-function distanceToSegment(point: Point, start: Point, end: Point): number {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  if (dx === 0 && dy === 0) {
-    return Math.hypot(point.x - start.x, point.y - start.y);
-  }
-  const t = clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy), 0, 1);
-  const projectionX = start.x + t * dx;
-  const projectionY = start.y + t * dy;
-  return Math.hypot(point.x - projectionX, point.y - projectionY);
 }
 
 function clamp(value: number, min: number, max: number): number {

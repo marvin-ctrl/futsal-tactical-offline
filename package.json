@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:interactions": "node --import tsx --test --test-concurrency=1 tests/milestone2-interactions.test.ts",
     "preview": "vite preview",
     "parity:check": "tsx scripts/check-preview-export-parity.ts",
     "tauri:dev": "tauri dev",

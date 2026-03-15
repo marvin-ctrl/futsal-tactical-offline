@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { defaultProject } from "../lib/defaultProject";
+import { applyCommandToDrawableState } from "../lib/editorCommands";
 import {
   ensureEditableKeyframe,
   migrateProjectToCurrent,
@@ -7,13 +8,15 @@ import {
   replaceKeyframeDrawableState
 } from "../lib/projectSchema";
 import { sampleTimelineAt } from "../lib/timeline";
-import type { Drawable, TacticalProject, UUID } from "../types/domain";
+import type { TacticalProject, UUID } from "../types/domain";
 import type { EditorCommand, SelectionState } from "../types/ui";
 
 interface HistoryEntry {
   label: string;
   before: TacticalProject;
   after: TacticalProject;
+  selectionBefore: UUID[];
+  selectionAfter: UUID[];
 }
 
 interface ApplyCommandOptions {
@@ -60,71 +63,6 @@ function resolveActiveKeyframeId(project: TacticalProject, playbackMs: number): 
         Math.round(keyframe.timestampMs) === Math.round(sampled.localTimestampMs)
     )?.id ?? null
   );
-}
-
-function applyCommandToDrawableState(
-  drawableState: Record<UUID, Drawable>,
-  command: EditorCommand
-): Record<UUID, Drawable> {
-  switch (command.type) {
-    case "batch":
-      return command.commands.reduce(
-        (currentState, entry) => applyCommandToDrawableState(currentState, entry),
-        drawableState
-      );
-    case "addDrawables": {
-      const nextState = { ...drawableState };
-      for (const drawable of command.drawables) {
-        nextState[drawable.id] = {
-          ...drawable,
-          style: { ...drawable.style }
-        };
-      }
-      return nextState;
-    }
-    case "updateDrawables": {
-      const nextState = { ...drawableState };
-      for (const update of command.updates) {
-        const existing = nextState[update.id];
-        if (!existing || existing.locked) {
-          continue;
-        }
-        nextState[update.id] = {
-          ...existing,
-          ...update.changes,
-          style: update.changes.style
-            ? {
-                ...existing.style,
-                ...update.changes.style
-              }
-            : { ...existing.style }
-        };
-      }
-      return nextState;
-    }
-    case "removeDrawables": {
-      const nextState = { ...drawableState };
-      for (const id of command.ids) {
-        if (nextState[id]?.locked) {
-          continue;
-        }
-        delete nextState[id];
-      }
-      return nextState;
-    }
-    case "setDrawableState":
-      return Object.fromEntries(
-        Object.entries(command.drawableState).map(([id, drawable]) => [
-          id,
-          {
-            ...drawable,
-            style: { ...drawable.style }
-          }
-        ])
-      );
-    default:
-      return drawableState;
-  }
 }
 
 export const useEditorState = create<EditorState>((set, get) => ({
@@ -201,7 +139,9 @@ export const useEditorState = create<EditorState>((set, get) => ({
     const entry: HistoryEntry = {
       label,
       before: beforeProject,
-      after: cloneProject(nextProject)
+      after: cloneProject(nextProject),
+      selectionBefore: [...state.selection.ids],
+      selectionAfter: [...(options?.selectionIds ?? state.selection.ids)]
     };
 
     set((current) => ({
@@ -223,6 +163,9 @@ export const useEditorState = create<EditorState>((set, get) => ({
 
       return {
         project: cloneProject(entry.before),
+        selection: {
+          ids: [...entry.selectionBefore]
+        },
         activeKeyframeId: resolveActiveKeyframeId(entry.before, state.playbackMs),
         undoStack: state.undoStack.slice(0, -1),
         redoStack: [...state.redoStack, entry]
@@ -237,6 +180,9 @@ export const useEditorState = create<EditorState>((set, get) => ({
 
       return {
         project: cloneProject(entry.after),
+        selection: {
+          ids: [...entry.selectionAfter]
+        },
         activeKeyframeId: resolveActiveKeyframeId(entry.after, state.playbackMs),
         undoStack: [...state.undoStack, entry].slice(-HISTORY_LIMIT),
         redoStack: state.redoStack.slice(0, -1)

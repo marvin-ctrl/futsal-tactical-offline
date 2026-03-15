@@ -5,6 +5,11 @@ interface BottomDockProps {
   bottomTab: BottomDockTab;
   playbackMs: number;
   totalDurationMs: number;
+  keyframes: Array<{
+    id: string;
+    playbackMs: number;
+  }>;
+  activeKeyframeId: string | null;
   selectedCount: number;
   isPlaying: boolean;
   canUndo: boolean;
@@ -12,6 +17,7 @@ interface BottomDockProps {
   onSelectTool: (tool: ActiveTool) => void;
   onSetBottomTab: (tab: BottomDockTab) => void;
   onSetPlaybackMs: (value: number) => void;
+  onJumpToKeyframe: (value: number) => void;
   onPlayToggle: () => void;
   onResetPlayback: () => void;
   onUndo: () => void;
@@ -25,6 +31,8 @@ export function BottomDock({
   bottomTab,
   playbackMs,
   totalDurationMs,
+  keyframes,
+  activeKeyframeId,
   selectedCount,
   isPlaying,
   canUndo,
@@ -32,11 +40,14 @@ export function BottomDock({
   onSelectTool,
   onSetBottomTab,
   onSetPlaybackMs,
+  onJumpToKeyframe,
   onPlayToggle,
   onResetPlayback,
   onUndo,
   onRedo
 }: BottomDockProps) {
+  const timelineMax = Math.max(totalDurationMs, 1000);
+
   return (
     <div className="bottom-dock">
       <div className="bottom-dock__tabs">
@@ -90,11 +101,26 @@ export function BottomDock({
               id="timeline-range"
               type="range"
               min={0}
-              max={Math.max(totalDurationMs, 1000)}
+              max={timelineMax}
               step={50}
               value={playbackMs}
               onChange={(event) => onSetPlaybackMs(Number(event.target.value))}
             />
+            <div className="keyframe-lane" aria-label="Keyframe lane">
+              <div className="keyframe-lane__track" />
+              {keyframes.map((keyframe) => (
+                <button
+                  key={keyframe.id}
+                  type="button"
+                  className={`keyframe-marker ${activeKeyframeId === keyframe.id ? "is-active" : ""}`}
+                  style={{
+                    left: `${(keyframe.playbackMs / timelineMax) * 100}%`
+                  }}
+                  onClick={() => onJumpToKeyframe(keyframe.playbackMs)}
+                  aria-label={`Jump to keyframe at ${Math.round(keyframe.playbackMs)} milliseconds`}
+                />
+              ))}
+            </div>
             <span>
               {Math.round(playbackMs)} / {Math.round(totalDurationMs)} ms
             </span>

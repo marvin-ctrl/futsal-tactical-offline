@@ -27,6 +27,7 @@ export function App() {
     project,
     playbackMs,
     selection,
+    activeKeyframeId,
     undoStack,
     redoStack,
     setPlaybackMs,
@@ -74,6 +75,24 @@ export function App() {
     () => sampledState.drawables.filter((drawable) => selection.ids.includes(drawable.id)),
     [sampledState.drawables, selection.ids]
   );
+  const timelineKeyframes = useMemo(() => {
+    const sceneStartById = new Map<string, number>();
+    let cursor = 0;
+
+    [...project.scenes]
+      .sort((left, right) => left.orderIndex - right.orderIndex)
+      .forEach((scene) => {
+        sceneStartById.set(scene.id, cursor);
+        cursor += scene.durationMs;
+      });
+
+    return project.keyframes
+      .map((keyframe) => ({
+        id: keyframe.id,
+        playbackMs: (sceneStartById.get(keyframe.sceneId) ?? 0) + keyframe.timestampMs
+      }))
+      .sort((left, right) => left.playbackMs - right.playbackMs);
+  }, [project]);
   const projectRowsForUi = projectRows.length > 0 ? projectRows : [PROJECT_FALLBACK_ROW(project)];
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
@@ -472,6 +491,8 @@ export function App() {
           bottomTab={bottomTab}
           playbackMs={playbackMs}
           totalDurationMs={totalDurationMs}
+          keyframes={timelineKeyframes}
+          activeKeyframeId={activeKeyframeId}
           selectedCount={selection.ids.length}
           isPlaying={isPlaying}
           canUndo={canUndo}
@@ -482,6 +503,7 @@ export function App() {
           }}
           onSetBottomTab={setBottomTab}
           onSetPlaybackMs={setPlaybackMs}
+          onJumpToKeyframe={setPlaybackMs}
           onPlayToggle={() => setIsPlaying((value) => !value)}
           onResetPlayback={() => {
             setIsPlaying(false);
