@@ -65,6 +65,7 @@ export function TacticalCanvas({
 }: TacticalCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const metaRef = useRef<HTMLParagraphElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({
     width: fixedWidth ?? 960,
     height: fixedHeight ?? 540
@@ -117,7 +118,10 @@ export function TacticalCanvas({
     }
 
     const resize = () => {
-      const nextWidth = Math.max(320, Math.floor(wrapper.clientWidth));
+      const availableWidth = Math.max(240, Math.floor(wrapper.clientWidth));
+      const metaHeight = metaRef.current?.offsetHeight ?? 24;
+      const availableHeight = Math.max(180, Math.floor(wrapper.clientHeight - metaHeight - 8));
+      const nextWidth = Math.min(availableWidth, Math.floor((availableHeight * 16) / 9));
       setCanvasSize({
         width: nextWidth,
         height: Math.floor(nextWidth * 0.5625)
@@ -127,6 +131,9 @@ export function TacticalCanvas({
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(wrapper);
+    if (metaRef.current) {
+      observer.observe(metaRef.current);
+    }
     return () => observer.disconnect();
   }, [fixedHeight, fixedWidth]);
 
@@ -335,7 +342,7 @@ export function TacticalCanvas({
         onPointerUp={handlePointerUp}
         onPointerCancel={() => setInteraction({ mode: "idle" })}
       />
-      <p className="tactical-preview-meta">
+      <p ref={metaRef} className="tactical-preview-meta">
         Scene: {sampledState.activeSceneName || "-"} ({Math.round(sampledState.localTimestampMs)} ms)
       </p>
     </div>

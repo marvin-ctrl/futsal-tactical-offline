@@ -24,7 +24,7 @@ const initialShellVersion =
 
 export const useUiState = create<UiState>((set) => ({
   activeTool: "select",
-  activeSidePanel: "tools",
+  activeSidePanel: "inspector",
   bottomTab: "edit",
   devDrawer: {
     open: false

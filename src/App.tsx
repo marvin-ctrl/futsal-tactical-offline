@@ -474,10 +474,6 @@ export function App() {
           exportJobs={exportJobs}
           loadStatus={loadStatus}
           onSelectPanel={setSidePanel}
-          onSelectTool={(tool) => {
-            setBottomTab(tool === "select" ? bottomTab : "edit");
-            setActiveTool(tool);
-          }}
           onLoadProject={loadProjectFromLocal}
           onQueueExport={queueMp4Export}
           onRefreshExports={refreshExportJobs}

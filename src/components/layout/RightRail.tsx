@@ -11,7 +11,6 @@ interface RightRailProps {
   exportJobs: ExportJob[];
   loadStatus: string;
   onSelectPanel: (panel: ActiveSidePanel) => void;
-  onSelectTool: (tool: ActiveTool) => void;
   onLoadProject: (projectId: string) => void;
   onQueueExport: () => void;
   onRefreshExports: () => void;
@@ -27,8 +26,6 @@ const panelButtons: Array<{ id: ActiveSidePanel; label: string }> = [
   { id: "effects", label: "Effects" }
 ];
 
-const quickTools: ActiveTool[] = ["select", "player", "goalkeeper", "ball", "cone", "arrow", "line", "zone", "label"];
-
 export function RightRail({
   activeSidePanel,
   activeTool,
@@ -39,7 +36,6 @@ export function RightRail({
   exportJobs,
   loadStatus,
   onSelectPanel,
-  onSelectTool,
   onLoadProject,
   onQueueExport,
   onRefreshExports,
@@ -63,19 +59,14 @@ export function RightRail({
 
       {activeSidePanel === "tools" ? (
         <section className="inspector-card">
-          <h2>Tool Launcher</h2>
-          <div className="tool-grid">
-            {quickTools.map((tool) => (
-              <button
-                key={tool}
-                type="button"
-                className={`tool-chip ${activeTool === tool ? "is-active" : ""}`}
-                onClick={() => onSelectTool(tool)}
-              >
-                {tool}
-              </button>
-            ))}
-          </div>
+          <h2>Tool Context</h2>
+          <p>Active tool: {activeTool[0].toUpperCase() + activeTool.slice(1)}</p>
+          <p>Tool switching lives in the bottom dock so the shell only shows one edit palette at a time.</p>
+          <ul className="inspector-list">
+            <li>Select: click to select, drag empty space to marquee.</li>
+            <li>Shift+click: add or remove from selection.</li>
+            <li>Escape clears selection and cancels an in-progress draw.</li>
+          </ul>
         </section>
       ) : null}
 
