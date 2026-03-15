@@ -154,71 +154,54 @@ function drawHalfCourt(
   const right = width - margin;
   const bottom = height - margin;
   const lineColor = "#0b1020";
-  const unit = Math.min((right - left) / 20, (bottom - top) / 20);
+  const unit = Math.min((right - left) / 40, (bottom - top) / 20);
   const centerX = width * 0.5;
-  const centerY = top + (bottom - top) * 0.5;
+  const centerY = height * 0.5;
   const goalWidth = 3 * unit;
   const goalDepth = 1 * unit;
-  const penaltyRadius = 6 * unit;
   const penaltyDist = 6 * unit;
-  const penaltyJoinHalf = 1.58 * unit;
-  const penaltyJoinLeft = centerX - penaltyJoinHalf;
-  const penaltyJoinRight = centerX + penaltyJoinHalf;
+  const centerRadius = 3 * unit;
+  const cornerRadius = Math.max(2, 0.25 * unit);
 
   context.fillStyle = "#1388b8";
   context.fillRect(left, top, right - left, bottom - top);
 
   strokeRect(context, left, top, right - left, bottom - top, lineColor, 2);
+  drawLine(context, centerX, top, centerX, bottom, lineColor, 2, false);
 
-  const halfLineY = bottom - 0.5 * unit;
-  drawLine(context, left, halfLineY, right, halfLineY, lineColor, 2, false);
-
-  const goalTop = centerY - goalWidth * 0.5;
-  drawLine(
-    context,
-    centerX - goalWidth * 0.5,
-    top - 6,
-    centerX + goalWidth * 0.5,
-    top - 6,
-    lineColor,
-    2,
-    false
-  );
-  strokeRect(
-    context,
-    centerX - goalWidth * 0.5,
-    top - goalDepth,
-    goalWidth,
-    goalDepth,
-    lineColor,
-    2
-  );
-
-  const leftPostX = centerX - goalWidth * 0.5;
-  const rightPostX = centerX + goalWidth * 0.5;
-  const leftJoinAngle = (Math.atan2(penaltyDist, penaltyJoinLeft - leftPostX) * 180) / Math.PI;
-  const rightJoinAngle = (Math.atan2(penaltyDist, penaltyJoinRight - rightPostX) * 180) / Math.PI;
-  drawArc(context, leftPostX, top, penaltyRadius, 180, leftJoinAngle, lineColor, 2);
-  drawArc(context, rightPostX, top, penaltyRadius, rightJoinAngle, 0, lineColor, 2);
-  drawLine(
-    context,
-    penaltyJoinLeft,
-    top + penaltyDist,
-    penaltyJoinRight,
-    top + penaltyDist,
-    lineColor,
-    2,
-    false
-  );
-
-  fillCircle(context, centerX, top + penaltyDist, 4, lineColor);
-  fillCircle(context, centerX, top + 10 * unit, 4, lineColor);
-
-  drawArc(context, centerX, halfLineY, 3 * unit, 180, 360, lineColor, 2);
-
-  const cornerRadius = Math.max(2, 0.25 * unit);
   drawArc(context, left, top, cornerRadius, 0, 90, lineColor, 2);
+  drawArc(context, left, bottom, cornerRadius, -90, 0, lineColor, 2);
   drawArc(context, right, top, cornerRadius, 90, 180, lineColor, 2);
+  drawArc(context, right, bottom, cornerRadius, 180, 270, lineColor, 2);
+
+  fillCircle(context, centerX, centerY, 3, lineColor);
+  context.strokeStyle = lineColor;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc(centerX, centerY, centerRadius, Math.PI * 0.5, Math.PI * 1.5);
+  context.stroke();
+
+  drawFutsalPenaltyArea(context, {
+    side: "left",
+    left,
+    right,
+    top,
+    bottom,
+    unit,
+    lineColor
+  });
+
+  strokeRect(context, left - goalDepth, centerY - goalWidth * 0.5, goalDepth, goalWidth, lineColor, 2);
+  fillCircle(context, left + penaltyDist, centerY, 4, lineColor);
+  fillCircle(context, left + 10 * unit, centerY, 4, lineColor);
+
+  drawSubstitutionMarks(context, left, right, top, bottom, unit, lineColor);
+  drawTouchlineDistanceMarks(context, left, right, top, bottom, unit, lineColor);
+
+  context.save();
+  context.fillStyle = "rgba(7, 17, 34, 0.18)";
+  context.fillRect(centerX, top, right - centerX, bottom - top);
+  context.restore();
 }
 
 interface FutsalEndArgs {

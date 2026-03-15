@@ -29,8 +29,12 @@ export function DevDrawer({
   onSetShellVersion,
   onClose
 }: DevDrawerProps) {
+  if (!isOpen) {
+    return null;
+  }
+
   return (
-    <aside className={`dev-drawer ${isOpen ? "is-open" : ""}`} aria-hidden={!isOpen}>
+    <aside className="dev-drawer" role="dialog" aria-modal="false" aria-label="Developer diagnostics">
       <div className="dev-drawer__header">
         <div>
           <p className="eyebrow">Diagnostics</p>

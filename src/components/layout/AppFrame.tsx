@@ -4,7 +4,7 @@ import type { ViewportMode } from "../../types/ui";
 interface AppFrameProps extends PropsWithChildren {
   viewportMode: ViewportMode;
   topBar: ReactNode;
-  leftRail: ReactNode;
+  leftRail?: ReactNode;
   rightRail: ReactNode;
   bottomDock: ReactNode;
   devDrawer: ReactNode;
@@ -20,10 +20,10 @@ export function AppFrame({
   children
 }: AppFrameProps) {
   return (
-    <main className={`app-frame viewport-${viewportMode}`}>
+    <main className={`app-frame viewport-${viewportMode}${leftRail ? "" : " app-frame--no-left"}`}>
       <div className="app-frame__texture" />
       <header className="app-frame__top">{topBar}</header>
-      <aside className="app-frame__left">{leftRail}</aside>
+      {leftRail ? <aside className="app-frame__left">{leftRail}</aside> : null}
       <section className="app-frame__center">{children}</section>
       <aside className="app-frame__right">{rightRail}</aside>
       <footer className="app-frame__bottom">{bottomDock}</footer>

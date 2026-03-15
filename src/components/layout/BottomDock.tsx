@@ -12,14 +12,19 @@ interface BottomDockProps {
   activeKeyframeId: string | null;
   selectedCount: number;
   isPlaying: boolean;
+  playbackRate: number;
   canUndo: boolean;
   canRedo: boolean;
+  canDuplicate: boolean;
   onSelectTool: (tool: ActiveTool) => void;
   onSetBottomTab: (tab: BottomDockTab) => void;
   onSetPlaybackMs: (value: number) => void;
   onJumpToKeyframe: (value: number) => void;
   onPlayToggle: () => void;
   onResetPlayback: () => void;
+  onDuplicate: () => void;
+  onSetPlaybackRate: (rate: number) => void;
+  onStepToKeyframe: (direction: -1 | 1) => void;
   onUndo: () => void;
   onRedo: () => void;
 }
@@ -35,14 +40,19 @@ export function BottomDock({
   activeKeyframeId,
   selectedCount,
   isPlaying,
+  playbackRate,
   canUndo,
   canRedo,
+  canDuplicate,
   onSelectTool,
   onSetBottomTab,
   onSetPlaybackMs,
   onJumpToKeyframe,
   onPlayToggle,
   onResetPlayback,
+  onDuplicate,
+  onSetPlaybackRate,
+  onStepToKeyframe,
   onUndo,
   onRedo
 }: BottomDockProps) {
@@ -83,6 +93,9 @@ export function BottomDock({
           </div>
           <div className="dock-summary">{selectedCount} selected</div>
           <div className="button-inline-row">
+            <button type="button" className="button button--ghost" onClick={onDuplicate} disabled={!canDuplicate}>
+              Duplicate
+            </button>
             <button type="button" className="button button--ghost" onClick={onUndo} disabled={!canUndo}>
               Undo
             </button>
@@ -126,13 +139,30 @@ export function BottomDock({
             </span>
           </div>
           <div className="transport-row">
+            <button type="button" className="button button--ghost" onClick={() => onStepToKeyframe(-1)}>
+              Prev
+            </button>
             <button type="button" className="button button--ghost" onClick={onResetPlayback}>
               Reset
             </button>
             <button type="button" className="button button--accent" onClick={onPlayToggle}>
               {isPlaying ? "Pause" : "Play"}
             </button>
-            <span className="status-pill">1x speed</span>
+            <button type="button" className="button button--ghost" onClick={() => onStepToKeyframe(1)}>
+              Next
+            </button>
+            <div className="button-inline-row">
+              {[0.5, 1, 1.5, 2].map((rate) => (
+                <button
+                  key={rate}
+                  type="button"
+                  className={`button ${playbackRate === rate ? "button--accent" : "button--ghost"}`}
+                  onClick={() => onSetPlaybackRate(rate)}
+                >
+                  {rate}x
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       ) : null}

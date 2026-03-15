@@ -27,7 +27,8 @@ textarea {
 
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--teal);
   outline-offset: 2px;
 }
@@ -42,6 +43,10 @@ select:focus-visible {
   grid-template-rows: auto minmax(0, 1fr) auto;
   gap: var(--space-4);
   overflow: hidden;
+}
+
+.app-frame--no-left {
+  grid-template-columns: minmax(0, 1fr) 308px;
 }
 
 .app-frame__texture {
@@ -69,15 +74,20 @@ select:focus-visible {
 
 .app-frame__bottom {
   grid-column: 1 / -1;
+  min-height: 0;
 }
 
 .app-frame__center {
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .viewport-compact {
   grid-template-columns: 108px minmax(0, 1fr) 288px;
+}
+
+.viewport-compact.app-frame--no-left {
+  grid-template-columns: minmax(0, 1fr) 286px;
 }
 
 .viewport-fallback {

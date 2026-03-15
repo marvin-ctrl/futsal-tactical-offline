@@ -4,7 +4,7 @@ import { TacticalCanvas } from "./components/TacticalCanvas";
 import { AppFrame } from "./components/layout/AppFrame";
 import { BottomDock } from "./components/layout/BottomDock";
 import { DevDrawer } from "./components/layout/DevDrawer";
-import { LeftRail } from "./components/layout/LeftRail";
+import { ProjectDialog } from "./components/layout/ProjectDialog";
 import { RightRail } from "./components/layout/RightRail";
 import { TopCommandBar } from "./components/layout/TopCommandBar";
 import { LegacyShell } from "./components/shell/LegacyShell";
@@ -21,6 +21,8 @@ const PROJECT_FALLBACK_ROW = (project: TacticalProject): ProjectRow => ({
   name: project.meta.name,
   updatedAt: project.meta.updatedAt
 });
+
+type ProjectDialogMode = "manage" | "rename" | "saveAs";
 
 export function App() {
   const {
@@ -63,7 +65,11 @@ export function App() {
   const [exportJobs, setExportJobs] = useState<ExportJob[]>([]);
   const [projectRows, setProjectRows] = useState<ProjectRow[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [interactionCancelToken, setInteractionCancelToken] = useState(0);
+  const [exportPreset, setExportPreset] = useState("720p30");
+  const [sceneNote, setSceneNote] = useState("");
+  const [projectDialogMode, setProjectDialogMode] = useState<ProjectDialogMode | null>(null);
 
   const totalDurationMs = useMemo(
     () => project.scenes.reduce((sum, scene) => sum + scene.durationMs, 0),
@@ -166,11 +172,16 @@ export function App() {
   };
 
   const queueMp4Export = async () => {
+    const preset = {
+      "720p30": { fps: 30, width: 1280, height: 720 },
+      "1080p30": { fps: 30, width: 1920, height: 1080 },
+      "1080p60": { fps: 60, width: 1920, height: 1080 }
+    }[exportPreset] ?? { fps: 30 as const, width: 1280, height: 720 };
     const request: Mp4ExportRequest = {
       projectId: project.meta.id,
-      fps: 30,
-      width: 1280,
-      height: 720,
+      fps: preset.fps as 30 | 60,
+      width: preset.width,
+      height: preset.height,
       durationMs: Math.max(totalDurationMs, 1000),
       outputFileName: `${project.meta.id}-preview.mp4`
     };
@@ -183,6 +194,12 @@ export function App() {
     } catch {
       setExportStatus("export unavailable in web mode");
     }
+  };
+
+  const persistSceneNote = (value: string) => {
+    setSceneNote(value);
+    const noteKey = `scene.note.${project.meta.id}.${sampledState.activeSceneId ?? "none"}`;
+    window.localStorage.setItem(noteKey, value);
   };
 
   const cancelExportJob = async (jobId: string) => {
@@ -256,19 +273,163 @@ export function App() {
     setLoadStatus(`created ${nextProject.meta.id}`);
   };
 
+  const renameProject = (nextName: string) => {
+    if (!nextName || nextName === project.meta.name) {
+      return;
+    }
+    setProject({
+      ...project,
+      meta: {
+        ...project.meta,
+        name: nextName,
+        updatedAt: new Date().toISOString()
+      }
+    });
+    setPersistStatus("renamed locally");
+    setProjectDialogMode(null);
+  };
+
+  const saveProjectAs = async (nextName: string) => {
+    if (!nextName) {
+      return;
+    }
+
+    const nextProject: TacticalProject = {
+      ...project,
+      meta: {
+        ...project.meta,
+        id: createId("project"),
+        name: nextName,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      scenes: project.scenes.map((scene) => ({
+        ...scene,
+        projectId: ""
+      }))
+    };
+    nextProject.scenes = nextProject.scenes.map((scene) => ({
+      ...scene,
+      projectId: nextProject.meta.id
+    }));
+    setProject(nextProject);
+    setPersistStatus("save as pending");
+    setLoadStatus(`branched ${nextProject.meta.id}`);
+    setProjectDialogMode(null);
+
+    try {
+      const result = await invoke<string>("save_project", { project: nextProject });
+      setPersistStatus(result);
+      await refreshProjects();
+    } catch {
+      setPersistStatus("save as unavailable in web mode");
+    }
+  };
+
+  const closeProjectDialog = () => setProjectDialogMode(null);
+
+  const openProjectManager = () => setProjectDialogMode("manage");
+
+  const createProjectFromDialog = () => {
+    createNewProject();
+    setProjectDialogMode(null);
+  };
+
+  const loadProjectFromDialog = async (projectId: string) => {
+    await loadProjectFromLocal(projectId);
+    setProjectDialogMode(null);
+  };
+
+  const updateSelectedDrawables = (updates: Array<{ id: string; changes: Partial<Drawable> }>, label: string) => {
+    if (updates.length === 0) {
+      return;
+    }
+    applyCommand(
+      {
+        type: "updateDrawables",
+        updates
+      },
+      {
+        label,
+        selectionIds: selection.ids
+      }
+    );
+  };
+
+  const updateSelectionLabel = (label: string) => {
+    updateSelectedDrawables(
+      selectedDrawables.map((drawable) => ({
+        id: drawable.id,
+        changes: { label }
+      })),
+      "update label"
+    );
+  };
+
+  const updateSelectionStyle = (changes: { fill?: string; stroke?: string; opacity?: number; dashed?: boolean }) => {
+    updateSelectedDrawables(
+      selectedDrawables.map((drawable) => ({
+        id: drawable.id,
+        changes: {
+          style: {
+            ...drawable.style,
+            ...changes
+          }
+        }
+      })),
+      "update style"
+    );
+  };
+
+  const toggleSelectionLocked = () => {
+    updateSelectedDrawables(
+      selectedDrawables.map((drawable) => ({
+        id: drawable.id,
+        changes: { locked: !drawable.locked }
+      })),
+      "toggle lock"
+    );
+  };
+
+  const toggleSelectionHidden = () => {
+    updateSelectedDrawables(
+      selectedDrawables.map((drawable) => ({
+        id: drawable.id,
+        changes: { hidden: !drawable.hidden }
+      })),
+      "toggle visibility"
+    );
+  };
+
+  const stepToKeyframe = (direction: -1 | 1) => {
+    const ordered = timelineKeyframes.map((keyframe) => keyframe.playbackMs);
+    if (ordered.length === 0) {
+      return;
+    }
+    const next = direction > 0
+      ? ordered.find((value) => value > playbackMs) ?? ordered[ordered.length - 1]
+      : [...ordered].reverse().find((value) => value < playbackMs) ?? ordered[0];
+    setPlaybackMs(next);
+  };
+
   useEffect(() => {
     if (!isPlaying) {
       return;
     }
 
     const timerId = window.setInterval(() => {
-      advancePlaybackMs(60, totalDurationMs);
+      advancePlaybackMs(Math.round(60 * playbackRate), totalDurationMs);
     }, 60);
 
     return () => {
       window.clearInterval(timerId);
     };
-  }, [advancePlaybackMs, isPlaying, totalDurationMs]);
+  }, [advancePlaybackMs, isPlaying, playbackRate, totalDurationMs]);
+
+  useEffect(() => {
+    const noteKey = `scene.note.${project.meta.id}.${sampledState.activeSceneId ?? "none"}`;
+    setSceneNote(window.localStorage.getItem(noteKey) ?? "");
+  }, [project.meta.id, sampledState.activeSceneId]);
 
   useEffect(() => {
     if (activeTool !== "select") {
@@ -332,6 +493,14 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (projectDialogMode) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setProjectDialogMode(null);
+        }
+        return;
+      }
+
       const target = event.target as HTMLElement | null;
       if (
         target &&
@@ -374,18 +543,7 @@ export function App() {
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d" && selection.ids.length > 0) {
         event.preventDefault();
-        const duplicates = selectedDrawables.map((drawable) => duplicateDrawable(drawable));
-        applyCommand(
-          {
-            type: "addDrawables",
-            drawables: duplicates
-          },
-          {
-            label: "duplicate selection",
-            selectionIds: duplicates.map((drawable) => drawable.id)
-          }
-        );
-        setSelection(duplicates.map((drawable) => drawable.id));
+        duplicateSelection(selectedDrawables, applyCommand, setSelection);
         return;
       }
 
@@ -407,7 +565,7 @@ export function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [applyCommand, clearSelection, redo, selection.ids, selectedDrawables, setSelection, toggleDevDrawer, undo]);
+  }, [applyCommand, clearSelection, projectDialogMode, redo, selection.ids, selectedDrawables, setSelection, toggleDevDrawer, undo]);
 
   if (shellVersion === "legacy") {
     return (
@@ -448,19 +606,12 @@ export function App() {
           project={project}
           exportStatus={exportStatus}
           persistStatus={persistStatus}
-          projectRows={projectRowsForUi}
-          onNewProject={createNewProject}
+          exportPreset={exportPreset}
+          onOpenProjectDialog={openProjectManager}
           onSaveProject={saveProjectToLocal}
-          onLoadProject={loadProjectFromLocal}
           onQueueExport={queueMp4Export}
-          onSetCourtType={setCourtType}
-        />
-      }
-      leftRail={
-        <LeftRail
-          activeSidePanel={activeSidePanel}
-          onSelectPanel={setSidePanel}
-          onToggleDevDrawer={toggleDevDrawer}
+          onOpenFieldPanel={() => setSidePanel("field")}
+          onOpenExportPanel={() => setSidePanel("export")}
         />
       }
       rightRail={
@@ -468,17 +619,24 @@ export function App() {
           activeSidePanel={activeSidePanel}
           activeTool={activeTool}
           selectedCount={selection.ids.length}
+          selectedDrawables={selectedDrawables}
           selectedSummary={selectedDrawables.map((drawable) => `${drawable.type} · ${drawable.label ?? drawable.id}`)}
           project={project}
-          projectRows={projectRowsForUi}
           exportJobs={exportJobs}
-          loadStatus={loadStatus}
+          exportPreset={exportPreset}
+          sceneNote={sceneNote}
           onSelectPanel={setSidePanel}
-          onLoadProject={loadProjectFromLocal}
+          onSetCourtType={setCourtType}
+          onSetExportPreset={setExportPreset}
           onQueueExport={queueMp4Export}
           onRefreshExports={refreshExportJobs}
           onCancelExport={cancelExportJob}
           onRetryExport={retryExportJob}
+          onUpdateSelectionLabel={updateSelectionLabel}
+          onUpdateSelectionStyle={updateSelectionStyle}
+          onToggleSelectionLocked={toggleSelectionLocked}
+          onToggleSelectionHidden={toggleSelectionHidden}
+          onSetSceneNote={persistSceneNote}
         />
       }
       bottomDock={
@@ -491,8 +649,10 @@ export function App() {
           activeKeyframeId={activeKeyframeId}
           selectedCount={selection.ids.length}
           isPlaying={isPlaying}
+          playbackRate={playbackRate}
           canUndo={canUndo}
           canRedo={canRedo}
+          canDuplicate={selection.ids.length > 0}
           onSelectTool={(tool) => {
             setBottomTab(tool === "select" ? bottomTab : "edit");
             setActiveTool(tool);
@@ -505,25 +665,30 @@ export function App() {
             setIsPlaying(false);
             setPlaybackMs(0);
           }}
+          onDuplicate={() => duplicateSelection(selectedDrawables, applyCommand, setSelection)}
+          onSetPlaybackRate={setPlaybackRate}
+          onStepToKeyframe={stepToKeyframe}
           onUndo={undo}
           onRedo={redo}
         />
       }
       devDrawer={
-        <DevDrawer
-          isOpen={devDrawer.open}
-          health={health}
-          dbStatus={dbStatus}
-          persistStatus={persistStatus}
-          loadStatus={loadStatus}
-          exportStatus={exportStatus}
-          exportJobs={exportJobs}
-          shellVersion={shellVersion}
-          onCheckHealth={checkHealth}
-          onInitDatabase={initDatabase}
-          onSetShellVersion={setShellVersion}
-          onClose={toggleDevDrawer}
-        />
+        devDrawer.open ? (
+          <DevDrawer
+            isOpen={devDrawer.open}
+            health={health}
+            dbStatus={dbStatus}
+            persistStatus={persistStatus}
+            loadStatus={loadStatus}
+            exportStatus={exportStatus}
+            exportJobs={exportJobs}
+            shellVersion={shellVersion}
+            onCheckHealth={checkHealth}
+            onInitDatabase={initDatabase}
+            onSetShellVersion={setShellVersion}
+            onClose={toggleDevDrawer}
+          />
+        ) : null
       }
     >
       <section className="stage-shell">
@@ -576,6 +741,28 @@ export function App() {
           ) : null}
         </div>
       </section>
+      {projectDialogMode ? (
+        <ProjectDialog
+          mode={projectDialogMode}
+          project={project}
+          projectRows={projectRowsForUi}
+          persistStatus={persistStatus}
+          loadStatus={loadStatus}
+          onClose={closeProjectDialog}
+          onNewProject={createProjectFromDialog}
+          onLoadProject={loadProjectFromDialog}
+          onOpenDiagnostics={() => {
+            closeProjectDialog();
+            if (!devDrawer.open) {
+              toggleDevDrawer();
+            }
+          }}
+          onStartRename={() => setProjectDialogMode("rename")}
+          onStartSaveAs={() => setProjectDialogMode("saveAs")}
+          onRenameProject={renameProject}
+          onSaveProjectAs={saveProjectAs}
+        />
+      ) : null}
     </AppFrame>
   );
 }
@@ -590,4 +777,27 @@ function duplicateDrawable(drawable: Drawable): Drawable {
     y2: drawable.y2 !== undefined ? drawable.y2 + 12 : drawable.y2,
     style: { ...drawable.style }
   };
+}
+
+function duplicateSelection(
+  selectedDrawables: Drawable[],
+  applyCommand: ReturnType<typeof useEditorState.getState>["applyCommand"],
+  setSelection: ReturnType<typeof useEditorState.getState>["setSelection"]
+) {
+  if (selectedDrawables.length === 0) {
+    return;
+  }
+
+  const duplicates = selectedDrawables.map((drawable) => duplicateDrawable(drawable));
+  applyCommand(
+    {
+      type: "addDrawables",
+      drawables: duplicates
+    },
+    {
+      label: "duplicate selection",
+      selectionIds: duplicates.map((drawable) => drawable.id)
+    }
+  );
+  setSelection(duplicates.map((drawable) => drawable.id));
 }
