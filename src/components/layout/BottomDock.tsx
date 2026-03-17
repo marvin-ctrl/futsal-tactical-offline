@@ -1,4 +1,5 @@
 import type { ActiveTool, BottomDockTab } from "../../types/ui";
+import { getToolLabel } from "../../lib/uiLabels";
 
 interface BottomDockProps {
   activeTool: ActiveTool;
@@ -29,7 +30,7 @@ interface BottomDockProps {
   onRedo: () => void;
 }
 
-const editTools: ActiveTool[] = ["select", "player", "goalkeeper", "ball", "cone", "arrow", "line", "zone", "label"];
+const editTools: ActiveTool[] = ["select", "player", "goalkeeper", "ball", "cone", "run", "pass", "dribble", "zone", "label"];
 
 export function BottomDock({
   activeTool,
@@ -87,7 +88,7 @@ export function BottomDock({
                 className={`tool-chip ${activeTool === tool ? "is-active" : ""}`}
                 onClick={() => onSelectTool(tool)}
               >
-                {tool}
+                {getToolLabel(tool)}
               </button>
             ))}
           </div>

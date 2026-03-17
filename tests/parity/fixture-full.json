@@ -2,8 +2,15 @@
   "meta": {
     "id": "parity_fixture_full",
     "name": "Parity Fixture Full",
+    "description": "Parity test fixture for the full futsal court renderer.",
+    "category": "attacking pattern",
+    "restartType": "none",
+    "system": "3-1",
+    "ageBand": "senior",
+    "tags": ["parity", "fixture"],
+    "sourceTemplateId": "blank-board",
     "courtType": "full",
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "createdAt": "2026-02-19T00:00:00.000Z",
     "updatedAt": "2026-02-19T00:00:00.000Z"
   },

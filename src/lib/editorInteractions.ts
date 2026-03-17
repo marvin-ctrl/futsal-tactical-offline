@@ -18,9 +18,13 @@ const LABEL_CHAR_WIDTH = 8;
 const LABEL_HORIZONTAL_PADDING = 12;
 const CIRCLE_HIT_PADDING = 4;
 const LINE_HIT_DISTANCE = 10;
+const PLAYER_DIAMETER = 24;
+const BALL_DIAMETER = 10;
+const CONE_DIAMETER = 12;
 
 export const MIN_DRAW_DISTANCE = 6;
 export const MOVE_THRESHOLD = 3;
+export type DrawTool = "run" | "pass" | "dribble" | "zone" | "arrow" | "line";
 
 export function estimateLabelSize(label?: string): { width: number; height: number } {
   const text = label?.trim() || "Label";
@@ -40,7 +44,15 @@ export function resolveMovableSelection(drawables: Drawable[], selectedIds: UUID
 }
 
 export function createPlacementDrawable(tool: ActiveTool, point: Point): Drawable | null {
-  if (tool === "select" || tool === "arrow" || tool === "line" || tool === "zone") {
+  if (
+    tool === "select" ||
+    tool === "run" ||
+    tool === "pass" ||
+    tool === "dribble" ||
+    tool === "arrow" ||
+    tool === "line" ||
+    tool === "zone"
+  ) {
     return null;
   }
 
@@ -55,19 +67,23 @@ export function createPlacementDrawable(tool: ActiveTool, point: Point): Drawabl
   return baseDrawable(tool, point);
 }
 
-export function buildPreviewDrawable(tool: "arrow" | "line" | "zone", start: Point, end: Point): Drawable {
+export function buildPreviewDrawable(tool: DrawTool, start: Point, end: Point): Drawable {
   return buildCommittedDrawable(tool, start, end, "preview");
 }
 
 export function buildCommittedDrawable(
-  tool: "arrow" | "line" | "zone",
+  tool: DrawTool,
   start: Point,
   end: Point,
   idPrefix: string = tool
 ): Drawable {
-  const base = baseDrawable(tool, start, createId(idPrefix));
+  const normalizedTool = normalizeDrawTool(tool);
+  const drawableType: DrawableType = normalizedTool === "zone" ? "zone" : "arrow";
+  const base = baseDrawable(drawableType, start, createId(idPrefix));
+  const style = getConnectionStyle(normalizedTool);
   return {
     ...base,
+    style,
     x2: end.x,
     y2: end.y,
     width: end.x - start.x,
@@ -151,7 +167,7 @@ export function getDrawableBounds(drawable: Drawable, padding: number = 0): {
     case "goalkeeper":
     case "ball":
     case "cone": {
-      const radius = Math.max(drawable.width ?? 24, drawable.height ?? 24) * 0.5;
+      const radius = getCircularDrawableRadius(drawable);
       return {
         left: drawable.x - radius - padding,
         top: drawable.y - radius - padding,
@@ -234,7 +250,7 @@ export function isPointInsideDrawable(drawable: Drawable, point: Point): boolean
     case "goalkeeper":
     case "ball":
     case "cone": {
-      const radius = Math.max(drawable.width ?? 24, drawable.height ?? 24) * 0.5;
+      const radius = getCircularDrawableRadius(drawable);
       return Math.hypot(point.x - drawable.x, point.y - drawable.y) <= radius + CIRCLE_HIT_PADDING;
     }
     case "label":
@@ -282,8 +298,8 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
         x: point.x,
         y: point.y,
         rotation: 0,
-        width: 28,
-        height: 28,
+        width: PLAYER_DIAMETER,
+        height: PLAYER_DIAMETER,
         label: "GK",
         style: {
           stroke: "#08131f",
@@ -299,11 +315,11 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
         x: point.x,
         y: point.y,
         rotation: 0,
-        width: 12,
-        height: 12,
+        width: BALL_DIAMETER,
+        height: BALL_DIAMETER,
         style: {
           stroke: "#0f172a",
-          fill: "#ffe082",
+          fill: "#f8fafc",
           strokeWidth: 1,
           opacity: 1
         }
@@ -315,8 +331,8 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
         x: point.x,
         y: point.y,
         rotation: 0,
-        width: 12,
-        height: 12,
+        width: CONE_DIAMETER,
+        height: CONE_DIAMETER,
         style: {
           stroke: "#8a4b08",
           fill: "#ff9f1c",
@@ -401,8 +417,8 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
         x: point.x,
         y: point.y,
         rotation: 0,
-        width: 28,
-        height: 28,
+        width: PLAYER_DIAMETER,
+        height: PLAYER_DIAMETER,
         label: "P",
         style: {
           stroke: "#08131f",
@@ -411,6 +427,66 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
           opacity: 1
         }
       };
+  }
+}
+
+function normalizeDrawTool(tool: DrawTool): "run" | "pass" | "dribble" | "zone" {
+  switch (tool) {
+    case "arrow":
+      return "run";
+    case "line":
+      return "pass";
+    default:
+      return tool;
+  }
+}
+
+function getConnectionStyle(tool: "run" | "pass" | "dribble" | "zone"): Drawable["style"] {
+  switch (tool) {
+    case "pass":
+      return {
+        stroke: "#f8fafc",
+        fill: "#f8fafc",
+        strokeWidth: 3,
+        opacity: 0.95
+      };
+    case "dribble":
+      return {
+        stroke: "#f4d35e",
+        fill: "#f4d35e",
+        strokeWidth: 4,
+        opacity: 0.95
+      };
+    case "zone":
+      return {
+        stroke: "#f59e0b",
+        fill: "#fbbf24",
+        strokeWidth: 2,
+        opacity: 0.2
+      };
+    case "run":
+    default:
+      return {
+        stroke: "#6ee7ff",
+        fill: "#6ee7ff",
+        strokeWidth: 3,
+        opacity: 0.95,
+        dashed: true
+      };
+  }
+}
+
+function getCircularDrawableRadius(drawable: Drawable): number {
+  switch (drawable.type) {
+    case "player":
+    case "goalkeeper":
+      return Math.max(Math.min(Math.max(drawable.width ?? PLAYER_DIAMETER, drawable.height ?? PLAYER_DIAMETER), PLAYER_DIAMETER) * 0.5, 9);
+    case "ball":
+      return Math.max(Math.min(Math.max(drawable.width ?? BALL_DIAMETER, drawable.height ?? BALL_DIAMETER), BALL_DIAMETER) * 0.5, 4);
+    case "cone":
+      return Math.max(Math.max(drawable.width ?? CONE_DIAMETER, drawable.height ?? CONE_DIAMETER) * 0.5, 5);
+    default:
+      return 12;
   }
 }
 

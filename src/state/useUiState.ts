@@ -1,14 +1,16 @@
 import { create } from "zustand";
 import { resolveViewportMode } from "../lib/layout";
-import type { ActiveSidePanel, ActiveTool, BottomDockTab, DevDrawerState, ViewportMode } from "../types/ui";
+import type { ActiveSidePanel, ActiveTool, AppView, BottomDockTab, DevDrawerState, ViewportMode } from "../types/ui";
 
 interface UiState {
+  appView: AppView;
   activeTool: ActiveTool;
   activeSidePanel: ActiveSidePanel;
   bottomTab: BottomDockTab;
   devDrawer: DevDrawerState;
   viewportMode: ViewportMode;
   shellVersion: "legacy" | "v2";
+  setAppView: (view: AppView) => void;
   setActiveTool: (tool: ActiveTool) => void;
   setSidePanel: (panel: ActiveSidePanel) => void;
   setBottomTab: (tab: BottomDockTab) => void;
@@ -23,6 +25,7 @@ const initialShellVersion =
     : "v2";
 
 export const useUiState = create<UiState>((set) => ({
+  appView: "dashboard",
   activeTool: "select",
   activeSidePanel: "inspector",
   bottomTab: "edit",
@@ -32,6 +35,7 @@ export const useUiState = create<UiState>((set) => ({
   viewportMode:
     typeof window !== "undefined" ? resolveViewportMode(window.innerWidth) : "wide",
   shellVersion: initialShellVersion,
+  setAppView: (view) => set({ appView: view }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   setSidePanel: (panel) => set({ activeSidePanel: panel }),
   setBottomTab: (tab) => set({ bottomTab: tab }),

@@ -1,5 +1,6 @@
-import type { ExportJob, TacticalProject } from "../../types/domain";
+import type { CourtType, ExportJob, TacticalProject } from "../../types/domain";
 import { TacticalCanvas } from "../TacticalCanvas";
+import { getCourtTypeLongLabel } from "../../lib/uiLabels";
 
 interface LegacyShellProps {
   project: TacticalProject;
@@ -22,7 +23,7 @@ interface LegacyShellProps {
   onLoadProject: () => void;
   onQueueExport: () => void;
   onRefreshExports: () => void;
-  onSetCourtType: (courtType: "full" | "half") => void;
+  onSetCourtType: (courtType: CourtType) => void;
 }
 
 export function LegacyShell({
@@ -60,15 +61,18 @@ export function LegacyShell({
       <section className="panel">
         <h2>Project Seed</h2>
         <p>Name: {project.meta.name}</p>
-        <p>Court: {project.meta.courtType ?? "full"}</p>
+        <p>Court: {getCourtTypeLongLabel(project.meta.courtType)}</p>
         <p>Scenes: {project.scenes.length}</p>
         <p>Keyframes: {project.keyframes.length}</p>
         <div className="button-row">
           <button type="button" onClick={() => onSetCourtType("full")}>
             Full Court
           </button>
-          <button type="button" onClick={() => onSetCourtType("half")}>
-            Half Court
+          <button type="button" onClick={() => onSetCourtType("half-attacking")}>
+            Attacking Half Focus
+          </button>
+          <button type="button" onClick={() => onSetCourtType("half-defending")}>
+            Defending Half Focus
           </button>
         </div>
       </section>

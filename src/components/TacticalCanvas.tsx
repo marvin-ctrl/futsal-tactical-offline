@@ -6,7 +6,13 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { drawTacticalFrame } from "../lib/canvasRenderer";
+import {
+  drawTacticalFrame,
+  resolveCanvasFrameSize,
+  resolveCourtRenderMapping,
+  type CourtRenderMapping,
+  type FramePoint
+} from "../lib/canvasRenderer";
 import {
   MIN_DRAW_DISTANCE,
   MOVE_THRESHOLD,
@@ -22,7 +28,7 @@ import {
   offsetDrawable,
   resolveMovableSelection,
   toggleSelection,
-  type CanvasSize,
+  type DrawTool,
   type Point
 } from "../lib/editorInteractions";
 import { sampleTimelineAt } from "../lib/timeline";
@@ -34,6 +40,7 @@ interface TacticalCanvasProps {
   playbackMs: number;
   width?: number;
   height?: number;
+  readOnly?: boolean;
   activeTool?: ActiveTool;
   selectedIds?: UUID[];
   interactionCancelToken?: number;
@@ -42,12 +49,17 @@ interface TacticalCanvasProps {
   onAutoPause?: () => void;
 }
 
+const WORLD_CANVAS_SIZE = {
+  width: 1000,
+  height: 500
+} as const;
+
 type InteractionState =
   | { mode: "idle" }
   | { mode: "placing"; tool: ActiveTool; point: Point }
   | { mode: "marquee"; start: Point; current: Point; additive: boolean }
   | { mode: "dragging"; start: Point; current: Point; ids: UUID[] }
-  | { mode: "drawing"; tool: "arrow" | "line" | "zone"; start: Point; current: Point };
+  | { mode: "drawing"; tool: DrawTool; start: Point; current: Point };
 
 const DEFAULT_TOOL: ActiveTool = "select";
 
@@ -56,6 +68,7 @@ export function TacticalCanvas({
   playbackMs,
   width: fixedWidth,
   height: fixedHeight,
+  readOnly = false,
   activeTool = DEFAULT_TOOL,
   selectedIds = [],
   interactionCancelToken,
@@ -65,12 +78,17 @@ export function TacticalCanvas({
 }: TacticalCanvasProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const metaRef = useRef<HTMLParagraphElement | null>(null);
-  const [canvasSize, setCanvasSize] = useState({
-    width: fixedWidth ?? 960,
-    height: fixedHeight ?? 540
+  const worldSize = WORLD_CANVAS_SIZE;
+  const frameSize = useMemo(() => resolveCanvasFrameSize(project.meta.courtType ?? "full"), [project.meta.courtType]);
+  const [displaySize, setDisplaySize] = useState({
+    width: fixedWidth ?? frameSize.width,
+    height: fixedHeight ?? frameSize.height
   });
   const [interaction, setInteraction] = useState<InteractionState>({ mode: "idle" });
+  const renderMapping = useMemo(
+    () => resolveCourtRenderMapping(project.meta.courtType ?? "full", frameSize.width, frameSize.height),
+    [frameSize.height, frameSize.width, project.meta.courtType]
+  );
 
   const sampledState = useMemo(() => sampleTimelineAt(project, playbackMs), [project, playbackMs]);
 
@@ -85,7 +103,7 @@ export function TacticalCanvas({
           x: interaction.current.x - interaction.start.x,
           y: interaction.current.y - interaction.start.y
         },
-        canvasSize
+        worldSize
       );
       drawables = drawables.map((drawable) => {
         if (!interaction.ids.includes(drawable.id)) {
@@ -96,18 +114,15 @@ export function TacticalCanvas({
     }
 
     if (interaction.mode === "drawing") {
-      drawables = [
-        ...drawables,
-        buildPreviewDrawable(interaction.tool, interaction.start, interaction.current)
-      ];
+      drawables = [...drawables, buildPreviewDrawable(interaction.tool, interaction.start, interaction.current)];
     }
 
     return drawables;
-  }, [canvasSize, interaction, sampledState.drawables]);
+  }, [interaction, sampledState.drawables, worldSize]);
 
   useLayoutEffect(() => {
     if (fixedWidth && fixedHeight) {
-      setCanvasSize({ width: fixedWidth, height: fixedHeight });
+      setDisplaySize({ width: fixedWidth, height: fixedHeight });
     }
   }, [fixedHeight, fixedWidth]);
 
@@ -117,25 +132,23 @@ export function TacticalCanvas({
       return;
     }
 
+    const aspectRatio = frameSize.width / frameSize.height;
     const resize = () => {
       const availableWidth = Math.max(240, Math.floor(wrapper.clientWidth));
-      const metaHeight = metaRef.current?.offsetHeight ?? 24;
-      const availableHeight = Math.max(180, Math.floor(wrapper.clientHeight - metaHeight - 8));
-      const nextWidth = Math.min(availableWidth, Math.floor((availableHeight * 16) / 9));
-      setCanvasSize({
+      const availableHeight = Math.max(160, Math.floor(wrapper.clientHeight));
+      const nextWidth = Math.min(availableWidth, Math.floor(availableHeight * aspectRatio));
+      const nextHeight = Math.max(160, Math.floor(nextWidth / aspectRatio));
+      setDisplaySize({
         width: nextWidth,
-        height: Math.floor(nextWidth * 0.5625)
+        height: nextHeight
       });
     };
 
     resize();
     const observer = new ResizeObserver(resize);
     observer.observe(wrapper);
-    if (metaRef.current) {
-      observer.observe(metaRef.current);
-    }
     return () => observer.disconnect();
-  }, [fixedHeight, fixedWidth]);
+  }, [fixedHeight, fixedWidth, frameSize.height, frameSize.width]);
 
   useEffect(() => {
     setInteraction({ mode: "idle" });
@@ -148,10 +161,10 @@ export function TacticalCanvas({
     }
 
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(canvasSize.width * ratio);
-    canvas.height = Math.floor(canvasSize.height * ratio);
-    canvas.style.width = `${canvasSize.width}px`;
-    canvas.style.height = `${canvasSize.height}px`;
+    canvas.width = Math.floor(frameSize.width * ratio);
+    canvas.height = Math.floor(frameSize.height * ratio);
+    canvas.style.width = `${displaySize.width}px`;
+    canvas.style.height = `${displaySize.height}px`;
 
     const context = canvas.getContext("2d");
     if (!context) {
@@ -160,20 +173,47 @@ export function TacticalCanvas({
 
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     drawTacticalFrame(context, {
-      width: canvasSize.width,
-      height: canvasSize.height,
+      width: frameSize.width,
+      height: frameSize.height,
       courtType: project.meta.courtType ?? "full",
       drawables: renderDrawables
     });
+
+    context.save();
+    if (project.meta.courtType && project.meta.courtType !== "full") {
+      context.beginPath();
+      context.rect(
+        renderMapping.contentRect.x,
+        renderMapping.contentRect.y,
+        renderMapping.contentRect.width,
+        renderMapping.contentRect.height
+      );
+      context.clip();
+    }
+    renderMapping.applyToContext(context);
     drawSelectionOverlay(context, renderDrawables, selectedIds);
 
     if (interaction.mode === "marquee") {
       drawMarqueeOverlay(context, interaction.start, interaction.current);
     }
-  }, [canvasSize.height, canvasSize.width, interaction, project.meta.courtType, renderDrawables, selectedIds]);
+    context.restore();
+  }, [
+    displaySize.height,
+    displaySize.width,
+    frameSize.height,
+    frameSize.width,
+    interaction,
+    project.meta.courtType,
+    renderDrawables,
+    renderMapping,
+    selectedIds
+  ]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const point = resolveCanvasPoint(event, canvasRef.current, canvasSize);
+    if (readOnly) {
+      return;
+    }
+    const point = resolveCanvasPoint(event, canvasRef.current, renderMapping);
     if (!point) {
       return;
     }
@@ -212,11 +252,18 @@ export function TacticalCanvas({
       return;
     }
 
-    if (activeTool === "arrow" || activeTool === "line" || activeTool === "zone") {
+    if (
+      activeTool === "run" ||
+      activeTool === "pass" ||
+      activeTool === "dribble" ||
+      activeTool === "arrow" ||
+      activeTool === "line" ||
+      activeTool === "zone"
+    ) {
       onAutoPause?.();
       setInteraction({
         mode: "drawing",
-        tool: activeTool,
+        tool: activeTool as DrawTool,
         start: point,
         current: point
       });
@@ -232,7 +279,10 @@ export function TacticalCanvas({
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const point = resolveCanvasPoint(event, canvasRef.current, canvasSize);
+    if (readOnly) {
+      return;
+    }
+    const point = resolveCanvasPoint(event, canvasRef.current, renderMapping);
     if (!point) {
       return;
     }
@@ -255,7 +305,10 @@ export function TacticalCanvas({
   };
 
   const handlePointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const point = resolveCanvasPoint(event, canvasRef.current, canvasSize);
+    if (readOnly) {
+      return;
+    }
+    const point = resolveCanvasPoint(event, canvasRef.current, renderMapping);
     event.currentTarget.releasePointerCapture(event.pointerId);
 
     if (!point) {
@@ -284,7 +337,7 @@ export function TacticalCanvas({
           x: point.x - interaction.start.x,
           y: point.y - interaction.start.y
         },
-        canvasSize
+        worldSize
       );
       if (Math.hypot(delta.x, delta.y) >= MOVE_THRESHOLD && interaction.ids.length > 0) {
         onCommand?.(
@@ -309,9 +362,7 @@ export function TacticalCanvas({
 
     if (interaction.mode === "drawing") {
       const endPoint = normalizeDrawPoint(interaction.start, point, event.shiftKey);
-      if (
-        Math.hypot(endPoint.x - interaction.start.x, endPoint.y - interaction.start.y) >= MIN_DRAW_DISTANCE
-      ) {
+      if (Math.hypot(endPoint.x - interaction.start.x, endPoint.y - interaction.start.y) >= MIN_DRAW_DISTANCE) {
         const drawable = buildCommittedDrawable(interaction.tool, interaction.start, endPoint);
         onCommand?.(
           {
@@ -342,9 +393,6 @@ export function TacticalCanvas({
         onPointerUp={handlePointerUp}
         onPointerCancel={() => setInteraction({ mode: "idle" })}
       />
-      <p ref={metaRef} className="tactical-preview-meta">
-        Scene: {sampledState.activeSceneName || "-"} ({Math.round(sampledState.localTimestampMs)} ms)
-      </p>
     </div>
   );
 }
@@ -352,16 +400,17 @@ export function TacticalCanvas({
 function resolveCanvasPoint(
   event: ReactPointerEvent<HTMLCanvasElement>,
   canvas: HTMLCanvasElement | null,
-  canvasSize: CanvasSize
+  mapping: CourtRenderMapping
 ): Point | null {
   if (!canvas) {
     return null;
   }
   const rect = canvas.getBoundingClientRect();
-  return {
-    x: clamp(((event.clientX - rect.left) / rect.width) * canvasSize.width, 0, canvasSize.width),
-    y: clamp(((event.clientY - rect.top) / rect.height) * canvasSize.height, 0, canvasSize.height)
+  const framePoint: FramePoint = {
+    x: ((event.clientX - rect.left) / rect.width) * mapping.frameWidth,
+    y: ((event.clientY - rect.top) / rect.height) * mapping.frameHeight
   };
+  return mapping.frameToWorld(framePoint);
 }
 
 function commitPlacement(
@@ -388,11 +437,7 @@ function commitPlacement(
   onSelectIds?.([drawable.id]);
 }
 
-function drawSelectionOverlay(
-  context: CanvasRenderingContext2D,
-  drawables: Drawable[],
-  selectedIds: UUID[]
-) {
+function drawSelectionOverlay(context: CanvasRenderingContext2D, drawables: Drawable[], selectedIds: UUID[]) {
   if (selectedIds.length === 0) {
     return;
   }
@@ -428,8 +473,4 @@ function drawMarqueeOverlay(context: CanvasRenderingContext2D, start: Point, end
   context.fillRect(left, top, width, height);
   context.strokeRect(left, top, width, height);
   context.restore();
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
 }

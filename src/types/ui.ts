@@ -6,10 +6,15 @@ export type ActiveTool =
   | "goalkeeper"
   | "ball"
   | "cone"
+  | "run"
+  | "pass"
+  | "dribble"
   | "arrow"
   | "line"
   | "zone"
   | "label";
+
+export type AppView = "dashboard" | "library" | "editor" | "presentation";
 
 export interface SelectionState {
   ids: UUID[];
@@ -23,16 +28,7 @@ export interface TransformState {
   currentY?: number;
 }
 
-export type ActiveSidePanel =
-  | "tools"
-  | "inspector"
-  | "boards"
-  | "projects"
-  | "field"
-  | "text"
-  | "notes"
-  | "effects"
-  | "export";
+export type ActiveSidePanel = "inspector" | "field" | "text" | "notes" | "effects" | "export";
 
 export type BottomDockTab = "edit" | "animation";
 

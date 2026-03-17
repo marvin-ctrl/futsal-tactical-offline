@@ -1,28 +1,81 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { DashboardView } from "./components/home/DashboardView";
+import { LibraryView } from "./components/library/LibraryView";
+import { PresentationView } from "./components/presentation/PresentationView";
 import { TacticalCanvas } from "./components/TacticalCanvas";
 import { AppFrame } from "./components/layout/AppFrame";
 import { BottomDock } from "./components/layout/BottomDock";
+import { DeletePlayDialog } from "./components/layout/DeletePlayDialog";
 import { DevDrawer } from "./components/layout/DevDrawer";
 import { ProjectDialog } from "./components/layout/ProjectDialog";
 import { RightRail } from "./components/layout/RightRail";
 import { TopCommandBar } from "./components/layout/TopCommandBar";
 import { LegacyShell } from "./components/shell/LegacyShell";
 import { defaultProject } from "./lib/defaultProject";
-import { createId, CURRENT_SCHEMA_VERSION, migrateProjectToCurrent } from "./lib/projectSchema";
+import { cacheProjectThumbnail, readProjectThumbnail, removeProjectThumbnail } from "./lib/projectThumbnail";
+import { cloneDrawableState, createId, CURRENT_SCHEMA_VERSION, migrateProjectToCurrent } from "./lib/projectSchema";
+import { createProjectFromTemplate, PLAY_TEMPLATES } from "./lib/projectTemplates";
 import { sampleTimelineAt, timelineSanityIssues } from "./lib/timeline";
+import { getCourtTypeLabel, getDrawableTypeLabel } from "./lib/uiLabels";
 import { useEditorState } from "./state/useEditorState";
 import { useUiState } from "./state/useUiState";
-import type { Drawable, ExportJob, Mp4ExportRequest, ProjectRow, TacticalProject } from "./types/domain";
-import type { ActiveTool } from "./types/ui";
+import type { LibraryFilters } from "./components/library/LibraryFiltersBar";
+import type { CourtType, Drawable, ExportJob, Mp4ExportRequest, ProjectMeta, ProjectRow, TacticalProject } from "./types/domain";
+import type { AppView } from "./types/ui";
 
 const PROJECT_FALLBACK_ROW = (project: TacticalProject): ProjectRow => ({
   id: project.meta.id,
   name: project.meta.name,
+  description: project.meta.description,
+  category: project.meta.category,
+  restartType: project.meta.restartType,
+  system: project.meta.system,
+  ageBand: project.meta.ageBand,
+  tags: project.meta.tags,
+  sceneCount: project.scenes.length,
   updatedAt: project.meta.updatedAt
 });
 
 type ProjectDialogMode = "manage" | "rename" | "saveAs";
+type PresentationReturnView = Exclude<AppView, "presentation">;
+
+const INITIAL_LIBRARY_FILTERS: LibraryFilters = {
+  search: "",
+  category: "",
+  restartType: "",
+  system: "",
+  ageBand: ""
+};
+
+function cloneProjectAsNewCopy(project: TacticalProject, nextName: string): TacticalProject {
+  const nextProjectId = createId("project");
+  const clonedAt = new Date().toISOString();
+  const sceneIdMap = new Map(project.scenes.map((scene) => [scene.id, createId("scene")]));
+
+  return {
+    ...project,
+    meta: {
+      ...project.meta,
+      id: nextProjectId,
+      name: nextName,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: clonedAt,
+      updatedAt: clonedAt
+    },
+    scenes: project.scenes.map((scene) => ({
+      ...scene,
+      id: sceneIdMap.get(scene.id) ?? createId("scene"),
+      projectId: nextProjectId
+    })),
+    keyframes: project.keyframes.map((keyframe) => ({
+      ...keyframe,
+      id: createId("kf"),
+      sceneId: sceneIdMap.get(keyframe.sceneId) ?? keyframe.sceneId,
+      drawableState: cloneDrawableState(keyframe.drawableState)
+    }))
+  };
+}
 
 export function App() {
   const {
@@ -43,12 +96,14 @@ export function App() {
     redo
   } = useEditorState();
   const {
+    appView,
     activeTool,
     activeSidePanel,
     bottomTab,
     devDrawer,
     viewportMode,
     shellVersion,
+    setAppView,
     setActiveTool,
     setSidePanel,
     setBottomTab,
@@ -70,6 +125,11 @@ export function App() {
   const [exportPreset, setExportPreset] = useState("720p30");
   const [sceneNote, setSceneNote] = useState("");
   const [projectDialogMode, setProjectDialogMode] = useState<ProjectDialogMode | null>(null);
+  const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(INITIAL_LIBRARY_FILTERS);
+  const [thumbnailById, setThumbnailById] = useState<Record<string, string | null>>({});
+  const [deleteTarget, setDeleteTarget] = useState<ProjectRow | null>(null);
+  const [presentationStartMs, setPresentationStartMs] = useState(0);
+  const [presentationReturnView, setPresentationReturnView] = useState<PresentationReturnView>("editor");
 
   const totalDurationMs = useMemo(
     () => project.scenes.reduce((sum, scene) => sum + scene.durationMs, 0),
@@ -100,6 +160,40 @@ export function App() {
       .sort((left, right) => left.playbackMs - right.playbackMs);
   }, [project]);
   const projectRowsForUi = projectRows.length > 0 ? projectRows : [PROJECT_FALLBACK_ROW(project)];
+  const filteredProjectRows = useMemo(() => {
+    const search = libraryFilters.search.trim().toLowerCase();
+    return projectRowsForUi.filter((row) => {
+      if (libraryFilters.category && row.category !== libraryFilters.category) {
+        return false;
+      }
+      if (libraryFilters.restartType && row.restartType !== libraryFilters.restartType) {
+        return false;
+      }
+      if (libraryFilters.system && row.system !== libraryFilters.system) {
+        return false;
+      }
+      if (libraryFilters.ageBand && row.ageBand !== libraryFilters.ageBand) {
+        return false;
+      }
+      if (!search) {
+        return true;
+      }
+
+      const haystack = [
+        row.name,
+        row.description ?? "",
+        row.category,
+        row.restartType,
+        row.system ?? "",
+        row.ageBand ?? "",
+        row.tags.join(" ")
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(search);
+    });
+  }, [libraryFilters, projectRowsForUi]);
+  const recentProjectRows = useMemo(() => projectRowsForUi.slice(0, 6), [projectRowsForUi]);
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
 
@@ -131,8 +225,17 @@ export function App() {
     }
   };
 
+  const updateThumbnailCache = (nextProject: TacticalProject) => {
+    const thumbnail = cacheProjectThumbnail(nextProject);
+    setThumbnailById((current) => ({
+      ...current,
+      [nextProject.meta.id]: thumbnail
+    }));
+  };
+
   const saveProjectToLocal = async () => {
     try {
+      updateThumbnailCache(project);
       const result = await invoke<string>("save_project", { project });
       setPersistStatus(result);
       resetHistory();
@@ -142,13 +245,29 @@ export function App() {
     }
   };
 
-  const loadProjectFromLocal = async (projectId = project.meta.id) => {
+  const loadProjectFromLocal = async (
+    projectId = project.meta.id,
+    options: {
+      targetView?: "editor" | "presentation";
+      returnView?: PresentationReturnView;
+      presentationStartMs?: number;
+    } = {}
+  ) => {
     try {
       const loadedProject = await invoke<TacticalProject>("load_project", {
         projectId
       });
-      setProject(migrateProjectToCurrent(loadedProject));
+      const migrated = migrateProjectToCurrent(loadedProject);
+      setProject(migrated);
+      updateThumbnailCache(migrated);
       setLoadStatus(`loaded ${projectId}`);
+      if (options.targetView === "presentation") {
+        setPresentationStartMs(options.presentationStartMs ?? 0);
+        setPresentationReturnView(options.returnView ?? "dashboard");
+        setAppView("presentation");
+      } else {
+        setAppView("editor");
+      }
     } catch {
       setLoadStatus("load unavailable in web mode");
     }
@@ -222,7 +341,7 @@ export function App() {
     }
   };
 
-  const setCourtType = (courtType: "full" | "half") => {
+  const setCourtType = (courtType: CourtType) => {
     setProject({
       ...project,
       meta: {
@@ -242,7 +361,14 @@ export function App() {
       meta: {
         ...defaultProject.meta,
         id: createId("project"),
-        name: "New Tactical Board",
+        name: "New Play",
+        description: "",
+        category: "attacking pattern",
+        restartType: "none",
+        system: undefined,
+        ageBand: undefined,
+        tags: [],
+        sourceTemplateId: "blank-board",
         schemaVersion: CURRENT_SCHEMA_VERSION,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -269,8 +395,30 @@ export function App() {
     setProject(nextProject);
     setPlaybackMs(0);
     clearSelection();
+    resetHistory();
+    updateThumbnailCache(nextProject);
     setPersistStatus("not saved");
     setLoadStatus(`created ${nextProject.meta.id}`);
+    setAppView("editor");
+  };
+
+  const createPlayFromTemplate = (templateId: string) => {
+    const nextProject = createProjectFromTemplate(templateId);
+    setProject(nextProject);
+    setPlaybackMs(0);
+    clearSelection();
+    resetHistory();
+    updateThumbnailCache(nextProject);
+    setPersistStatus("not saved");
+    setLoadStatus(`created ${nextProject.meta.id}`);
+    setAppView("editor");
+  };
+
+  const presentCurrentPlay = () => {
+    setIsPlaying(false);
+    setPresentationStartMs(playbackMs);
+    setPresentationReturnView("editor");
+    setAppView("presentation");
   };
 
   const renameProject = (nextName: string) => {
@@ -289,30 +437,26 @@ export function App() {
     setProjectDialogMode(null);
   };
 
+  const updateProjectMeta = (changes: Partial<ProjectMeta>) => {
+    setProject({
+      ...project,
+      meta: {
+        ...project.meta,
+        ...changes,
+        updatedAt: new Date().toISOString()
+      }
+    });
+    setPersistStatus("metadata updated locally");
+  };
+
   const saveProjectAs = async (nextName: string) => {
     if (!nextName) {
       return;
     }
 
-    const nextProject: TacticalProject = {
-      ...project,
-      meta: {
-        ...project.meta,
-        id: createId("project"),
-        name: nextName,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      },
-      scenes: project.scenes.map((scene) => ({
-        ...scene,
-        projectId: ""
-      }))
-    };
-    nextProject.scenes = nextProject.scenes.map((scene) => ({
-      ...scene,
-      projectId: nextProject.meta.id
-    }));
+    const nextProject = cloneProjectAsNewCopy(project, nextName);
     setProject(nextProject);
+    updateThumbnailCache(nextProject);
     setPersistStatus("save as pending");
     setLoadStatus(`branched ${nextProject.meta.id}`);
     setProjectDialogMode(null);
@@ -323,6 +467,51 @@ export function App() {
       await refreshProjects();
     } catch {
       setPersistStatus("save as unavailable in web mode");
+    }
+  };
+
+  const duplicateProjectFromLibrary = async (projectId: string) => {
+    try {
+      const loadedProject = await invoke<TacticalProject>("load_project", { projectId });
+      const sourceProject = migrateProjectToCurrent(loadedProject);
+      const duplicatedProject = cloneProjectAsNewCopy(sourceProject, `${sourceProject.meta.name} Copy`);
+      updateThumbnailCache(duplicatedProject);
+      await invoke<string>("save_project", { project: duplicatedProject });
+      setPersistStatus(`duplicated ${sourceProject.meta.name}`);
+      await refreshProjects();
+    } catch (error) {
+      setPersistStatus(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const requestDeleteProjectFromLibrary = (projectId: string) => {
+    const row = projectRowsForUi.find((candidate) => candidate.id === projectId);
+    if (!row) {
+      return;
+    }
+    setDeleteTarget(row);
+  };
+
+  const deleteProjectFromLibrary = async () => {
+    if (!deleteTarget) {
+      return;
+    }
+
+    const projectId = deleteTarget.id;
+    try {
+      await invoke<string>("delete_project", { projectId });
+      removeProjectThumbnail(projectId);
+      setThumbnailById((current) => {
+        const next = { ...current };
+        delete next[projectId];
+        return next;
+      });
+      await refreshProjects();
+      setPersistStatus(`deleted ${deleteTarget.name}`);
+    } catch (error) {
+      setPersistStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
@@ -338,6 +527,15 @@ export function App() {
   const loadProjectFromDialog = async (projectId: string) => {
     await loadProjectFromLocal(projectId);
     setProjectDialogMode(null);
+  };
+
+  const presentProjectFromLibrary = async (projectId: string, returnView: PresentationReturnView) => {
+    setIsPlaying(false);
+    await loadProjectFromLocal(projectId, {
+      targetView: "presentation",
+      returnView,
+      presentationStartMs: 0
+    });
   };
 
   const updateSelectedDrawables = (updates: Array<{ id: string; changes: Partial<Drawable> }>, label: string) => {
@@ -432,6 +630,54 @@ export function App() {
   }, [project.meta.id, sampledState.activeSceneId]);
 
   useEffect(() => {
+    let isCancelled = false;
+
+    const hydrateThumbnails = async () => {
+      const nextEntries = await Promise.all(
+        projectRowsForUi.map(async (row) => {
+          const cached = readProjectThumbnail(row.id);
+          if (cached) {
+            return [row.id, cached] as const;
+          }
+
+          if (row.id === project.meta.id) {
+            return [row.id, cacheProjectThumbnail(project)] as const;
+          }
+
+          try {
+            const loadedProject = await invoke<TacticalProject>("load_project", {
+              projectId: row.id
+            });
+            const migrated = migrateProjectToCurrent(loadedProject);
+            return [row.id, cacheProjectThumbnail(migrated)] as const;
+          } catch {
+            return [row.id, null] as const;
+          }
+        })
+      );
+
+      if (isCancelled) {
+        return;
+      }
+
+      setThumbnailById((current) => ({
+        ...current,
+        ...Object.fromEntries(nextEntries)
+      }));
+    };
+
+    void hydrateThumbnails();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [project, projectRowsForUi]);
+
+  useEffect(() => {
+    updateThumbnailCache(project);
+  }, [project.meta.id]);
+
+  useEffect(() => {
     if (activeTool !== "select") {
       setIsPlaying(false);
     }
@@ -492,6 +738,10 @@ export function App() {
   }, [setViewportMode]);
 
   useEffect(() => {
+    if (appView !== "editor") {
+      return;
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (projectDialogMode) {
         if (event.key === "Escape") {
@@ -565,7 +815,7 @@ export function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [applyCommand, clearSelection, projectDialogMode, redo, selection.ids, selectedDrawables, setSelection, toggleDevDrawer, undo]);
+  }, [appView, applyCommand, clearSelection, projectDialogMode, redo, selection.ids, selectedDrawables, setSelection, toggleDevDrawer, undo]);
 
   if (shellVersion === "legacy") {
     return (
@@ -598,6 +848,62 @@ export function App() {
     );
   }
 
+  if (appView === "dashboard") {
+    return (
+      <>
+        <DashboardView
+          templates={PLAY_TEMPLATES}
+          recentPlays={recentProjectRows}
+          thumbnailById={thumbnailById}
+          onCreateFromTemplate={createPlayFromTemplate}
+          onOpenPlay={loadProjectFromLocal}
+          onPresentPlay={(projectId) => void presentProjectFromLibrary(projectId, "dashboard")}
+          onDuplicatePlay={duplicateProjectFromLibrary}
+          onDeletePlay={requestDeleteProjectFromLibrary}
+          onOpenLibrary={() => setAppView("library")}
+        />
+        {deleteTarget ? (
+          <DeletePlayDialog play={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={deleteProjectFromLibrary} />
+        ) : null}
+      </>
+    );
+  }
+
+  if (appView === "library") {
+    return (
+      <>
+        <LibraryView
+          plays={filteredProjectRows}
+          filters={libraryFilters}
+          thumbnailById={thumbnailById}
+          onChangeFilters={setLibraryFilters}
+          onBack={() => setAppView("dashboard")}
+          onOpenPlay={loadProjectFromLocal}
+          onPresentPlay={(projectId) => void presentProjectFromLibrary(projectId, "library")}
+          onDuplicatePlay={duplicateProjectFromLibrary}
+          onDeletePlay={requestDeleteProjectFromLibrary}
+        />
+        {deleteTarget ? (
+          <DeletePlayDialog play={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={deleteProjectFromLibrary} />
+        ) : null}
+      </>
+    );
+  }
+
+  if (appView === "presentation") {
+    return (
+      <PresentationView
+        project={project}
+        initialPlaybackMs={presentationStartMs}
+        onExit={(nextPlaybackMs) => {
+          setPlaybackMs(nextPlaybackMs);
+          setIsPlaying(false);
+          setAppView(presentationReturnView);
+        }}
+      />
+    );
+  }
+
   return (
     <AppFrame
       viewportMode={viewportMode}
@@ -609,6 +915,7 @@ export function App() {
           exportPreset={exportPreset}
           onOpenProjectDialog={openProjectManager}
           onSaveProject={saveProjectToLocal}
+          onPresentPlay={presentCurrentPlay}
           onQueueExport={queueMp4Export}
           onOpenFieldPanel={() => setSidePanel("field")}
           onOpenExportPanel={() => setSidePanel("export")}
@@ -620,7 +927,7 @@ export function App() {
           activeTool={activeTool}
           selectedCount={selection.ids.length}
           selectedDrawables={selectedDrawables}
-          selectedSummary={selectedDrawables.map((drawable) => `${drawable.type} · ${drawable.label ?? drawable.id}`)}
+          selectedSummary={selectedDrawables.map((drawable) => `${getDrawableTypeLabel(drawable)} · ${drawable.label ?? drawable.id}`)}
           project={project}
           exportJobs={exportJobs}
           exportPreset={exportPreset}
@@ -695,11 +1002,11 @@ export function App() {
         <div className="stage-shell__header">
           <div>
             <p className="eyebrow">Tactical Board</p>
-            <h2>{sampledState.activeSceneName || "No active scene"}</h2>
+            <h2>{sampledState.activeSceneName || "No active step"}</h2>
           </div>
           <div className="button-inline-row">
             <span className="status-pill">{selection.ids.length} selected</span>
-            <span className="status-pill">{project.meta.courtType ?? "full"} court</span>
+            <span className="status-pill">{getCourtTypeLabel(project.meta.courtType)}</span>
           </div>
         </div>
 
@@ -748,9 +1055,14 @@ export function App() {
           projectRows={projectRowsForUi}
           persistStatus={persistStatus}
           loadStatus={loadStatus}
+          thumbnailById={thumbnailById}
           onClose={closeProjectDialog}
           onNewProject={createProjectFromDialog}
           onLoadProject={loadProjectFromDialog}
+          onOpenDashboard={() => {
+            closeProjectDialog();
+            setAppView("dashboard");
+          }}
           onOpenDiagnostics={() => {
             closeProjectDialog();
             if (!devDrawer.open) {
@@ -761,7 +1073,11 @@ export function App() {
           onStartSaveAs={() => setProjectDialogMode("saveAs")}
           onRenameProject={renameProject}
           onSaveProjectAs={saveProjectAs}
+          onUpdateProjectMeta={updateProjectMeta}
         />
+      ) : null}
+      {deleteTarget ? (
+        <DeletePlayDialog play={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={deleteProjectFromLibrary} />
       ) : null}
     </AppFrame>
   );

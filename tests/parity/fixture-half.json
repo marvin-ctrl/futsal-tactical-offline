@@ -2,8 +2,15 @@
   "meta": {
     "id": "parity_fixture_half",
     "name": "Parity Fixture Half",
-    "courtType": "half",
-    "schemaVersion": 2,
+    "description": "Parity test fixture for the half-court futsal renderer.",
+    "category": "set piece",
+    "restartType": "corner",
+    "system": "3-1",
+    "ageBand": "senior",
+    "tags": ["parity", "fixture", "half"],
+    "sourceTemplateId": "corner-routine",
+    "courtType": "half-attacking",
+    "schemaVersion": 3,
     "createdAt": "2026-02-19T00:00:00.000Z",
     "updatedAt": "2026-02-19T00:00:00.000Z"
   },

@@ -169,7 +169,7 @@ test("constrainDragDelta clamps groups uniformly at pitch boundaries", () => {
   ];
   const delta = constrainDragDelta(drawables, ["p1", "p2"], { x: -40, y: 0 }, { width: 120, height: 80 });
 
-  assert.deepEqual(delta, { x: -6, y: 0 });
+  assert.deepEqual(delta, { x: -8, y: 0 });
   const movedA = moveDrawableChanges(drawables[0], delta);
   const movedB = moveDrawableChanges(drawables[1], delta);
   assert.equal((movedB.x as number) - (movedA.x as number), 40);

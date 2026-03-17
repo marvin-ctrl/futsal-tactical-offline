@@ -1,5 +1,19 @@
 export type UUID = string;
 
+export type PlayCategory =
+  | "set piece"
+  | "attacking pattern"
+  | "defensive pattern"
+  | "transition";
+
+export type RestartType = "corner" | "kick-in" | "free kick" | "goalkeeper restart" | "none";
+
+export type SystemType = "3-1" | "4-0" | "2-2" | "1-2-1" | "other";
+
+export type AgeBand = "youth" | "academy" | "senior" | "pro";
+
+export type CourtType = "full" | "half-attacking" | "half-defending";
+
 export type DrawableType =
   | "player"
   | "goalkeeper"
@@ -13,7 +27,14 @@ export type DrawableType =
 export interface ProjectMeta {
   id: UUID;
   name: string;
-  courtType?: "full" | "half";
+  description?: string;
+  category: PlayCategory;
+  restartType: RestartType;
+  system?: SystemType;
+  ageBand?: AgeBand;
+  tags: string[];
+  sourceTemplateId?: string | null;
+  courtType?: CourtType;
   schemaVersion: number;
   createdAt: string;
   updatedAt: string;
@@ -68,6 +89,13 @@ export interface TacticalProject {
 export interface ProjectRow {
   id: UUID;
   name: string;
+  description?: string;
+  category: PlayCategory;
+  restartType: RestartType;
+  system?: SystemType;
+  ageBand?: AgeBand;
+  tags: string[];
+  sceneCount: number;
   updatedAt: string;
 }
 

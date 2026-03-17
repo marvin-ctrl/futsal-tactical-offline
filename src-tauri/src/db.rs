@@ -56,6 +56,7 @@ pub fn init_database(app: &AppHandle) -> Result<(), DbError> {
     connection.execute_batch(include_str!("../migrations/0001_init.sql"))?;
     ensure_project_court_type_column(&connection)?;
     ensure_project_schema_version_column(&connection)?;
+    ensure_project_metadata_schema(&connection)?;
     ensure_export_job_v2_schema(&connection)?;
     seed_sprint_zero_data(&connection)?;
     Ok(())
@@ -75,6 +76,36 @@ fn ensure_project_schema_version_column(connection: &Connection) -> Result<(), D
     ))?;
     connection.execute(
         "UPDATE project SET schema_version = COALESCE(schema_version, 1)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn ensure_project_metadata_schema(connection: &Connection) -> Result<(), DbError> {
+    let existing_columns = table_columns(connection, "project")?;
+    let required_columns = [
+        "description",
+        "category",
+        "restart_type",
+        "system",
+        "age_band",
+        "tags_json",
+        "source_template_id",
+    ];
+    let missing_columns = required_columns
+        .iter()
+        .any(|column| !existing_columns.iter().any(|existing| existing == column));
+
+    if missing_columns {
+        connection.execute_batch(include_str!("../migrations/0003_project_metadata_and_library.sql"))?;
+    }
+
+    connection.execute(
+        "UPDATE project
+         SET description = COALESCE(description, ''),
+             category = COALESCE(category, 'attacking pattern'),
+             restart_type = COALESCE(restart_type, 'none'),
+             tags_json = COALESCE(tags_json, '[]')",
         [],
     )?;
     Ok(())
@@ -180,10 +211,56 @@ fn table_columns(connection: &Connection, table_name: &str) -> Result<Vec<String
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
+fn is_valid_category(value: &str) -> bool {
+    matches!(
+        value,
+        "set piece" | "attacking pattern" | "defensive pattern" | "transition"
+    )
+}
+
+fn is_valid_restart_type(value: &str) -> bool {
+    matches!(
+        value,
+        "none" | "corner" | "kick-in" | "free kick" | "goalkeeper restart"
+    )
+}
+
+fn is_valid_system(value: &str) -> bool {
+    matches!(value, "3-1" | "4-0" | "2-2" | "1-2-1" | "other")
+}
+
+fn is_valid_age_band(value: &str) -> bool {
+    matches!(value, "youth" | "academy" | "senior" | "pro")
+}
+
 fn seed_sprint_zero_data(connection: &Connection) -> Result<(), DbError> {
     connection.execute(
-        "INSERT OR IGNORE INTO project (id, name, court_type, schema_version) VALUES (?1, ?2, ?3, ?4)",
-        params!["project_local_seed", "Sprint 0 Prototype", "full", 2],
+        "INSERT OR IGNORE INTO project (
+           id,
+           name,
+           description,
+           category,
+           restart_type,
+           system,
+           age_band,
+           tags_json,
+           source_template_id,
+           court_type,
+           schema_version
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            "project_local_seed",
+            "Build-Up Pattern",
+            "Sample attacking pattern for rehearsing the first progression into the middle third.",
+            "attacking pattern",
+            "none",
+            "3-1",
+            "senior",
+            serde_json::to_string(&vec!["build-up", "sample"])?,
+            "blank-board",
+            "full",
+            3
+        ],
     )?;
 
     connection.execute(
@@ -341,14 +418,45 @@ pub fn list_projects(app: &AppHandle) -> Result<Vec<ProjectRow>, DbError> {
     init_database(app)?;
     let connection = connect(app)?;
     let mut statement = connection.prepare(
-        "SELECT id, name, updated_at FROM project ORDER BY datetime(updated_at) DESC",
+        "SELECT
+           p.id,
+           p.name,
+           p.description,
+           p.category,
+           p.restart_type,
+           p.system,
+           p.age_band,
+           p.tags_json,
+           (
+             SELECT COUNT(*)
+             FROM scene s
+             WHERE s.project_id = p.id
+           ) AS scene_count,
+           p.updated_at
+         FROM project p
+         ORDER BY datetime(p.updated_at) DESC",
     )?;
 
     let rows = statement.query_map([], |row| {
+        let tags_json: String = row.get(7)?;
+        let tags = serde_json::from_str(&tags_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                7,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
         Ok(ProjectRow {
             id: row.get(0)?,
             name: row.get(1)?,
-            updated_at: row.get(2)?,
+            description: row.get(2)?,
+            category: row.get(3)?,
+            restart_type: row.get(4)?,
+            system: row.get(5)?,
+            age_band: row.get(6)?,
+            tags,
+            scene_count: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     })?;
 
@@ -374,12 +482,50 @@ fn validate_project_payload(project: &TacticalProjectPayload) -> Result<(), DbEr
         ));
     }
 
-    if let Some(court_type) = project.meta.court_type.as_deref() {
-        if court_type != "full" && court_type != "half" {
+    if !is_valid_category(&project.meta.category) {
+        return Err(DbError::Validation(
+            "project.meta.category must be a supported value".to_string(),
+        ));
+    }
+
+    if !is_valid_restart_type(&project.meta.restart_type) {
+        return Err(DbError::Validation(
+            "project.meta.restartType must be a supported value".to_string(),
+        ));
+    }
+
+    if let Some(system) = project.meta.system.as_deref() {
+        if !is_valid_system(system) {
             return Err(DbError::Validation(
-                "project.meta.courtType must be either 'full' or 'half'".to_string(),
+                "project.meta.system must be a supported value".to_string(),
             ));
         }
+    }
+
+    if let Some(age_band) = project.meta.age_band.as_deref() {
+        if !is_valid_age_band(age_band) {
+            return Err(DbError::Validation(
+                "project.meta.ageBand must be a supported value".to_string(),
+            ));
+        }
+    }
+
+    if let Some(court_type) = project.meta.court_type.as_deref() {
+        if court_type != "full"
+            && court_type != "half"
+            && court_type != "half-attacking"
+            && court_type != "half-defending"
+        {
+            return Err(DbError::Validation(
+                "project.meta.courtType must be 'full', 'half-attacking', or 'half-defending' (legacy 'half' is also accepted)".to_string(),
+            ));
+        }
+    }
+
+    if project.meta.tags.iter().any(|tag| tag.trim().is_empty()) {
+        return Err(DbError::Validation(
+            "project.meta.tags cannot contain empty values".to_string(),
+        ));
     }
 
     let mut scene_ids = HashSet::new();
@@ -426,16 +572,44 @@ pub fn save_project(app: &AppHandle, project: &TacticalProjectPayload) -> Result
     let transaction = connection.transaction()?;
 
     transaction.execute(
-        "INSERT INTO project (id, name, court_type, schema_version, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        "INSERT INTO project (
+           id,
+           name,
+           description,
+           category,
+           restart_type,
+           system,
+           age_band,
+           tags_json,
+           source_template_id,
+           court_type,
+           schema_version,
+           created_at,
+           updated_at
+         )
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
+           description = excluded.description,
+           category = excluded.category,
+           restart_type = excluded.restart_type,
+           system = excluded.system,
+           age_band = excluded.age_band,
+           tags_json = excluded.tags_json,
+           source_template_id = excluded.source_template_id,
            court_type = excluded.court_type,
            schema_version = excluded.schema_version,
            updated_at = CURRENT_TIMESTAMP",
         params![
             project.meta.id,
             project.meta.name,
+            project.meta.description.as_deref().unwrap_or(""),
+            project.meta.category,
+            project.meta.restart_type,
+            project.meta.system,
+            project.meta.age_band,
+            serde_json::to_string(&project.meta.tags)?,
+            project.meta.source_template_id,
             project.meta.court_type.as_deref().unwrap_or("full"),
             project.meta.schema_version,
         ],
@@ -494,16 +668,46 @@ pub fn load_project(app: &AppHandle, project_id: &str) -> Result<TacticalProject
 
     let meta = connection
         .query_row(
-            "SELECT id, name, court_type, schema_version, created_at, updated_at FROM project WHERE id = ?1",
+            "SELECT
+               id,
+               name,
+               description,
+               category,
+               restart_type,
+               system,
+               age_band,
+               tags_json,
+               source_template_id,
+               court_type,
+               schema_version,
+               created_at,
+               updated_at
+             FROM project
+             WHERE id = ?1",
             params![project_id],
             |row| {
+                let tags_json: String = row.get(7)?;
+                let tags = serde_json::from_str(&tags_json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        7,
+                        rusqlite::types::Type::Text,
+                        Box::new(error),
+                    )
+                })?;
                 Ok(ProjectMetaPayload {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    court_type: row.get(2)?,
-                    schema_version: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    description: row.get(2)?,
+                    category: row.get(3)?,
+                    restart_type: row.get(4)?,
+                    system: row.get(5)?,
+                    age_band: row.get(6)?,
+                    tags,
+                    source_template_id: row.get(8)?,
+                    court_type: row.get(9)?,
+                    schema_version: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
                 })
             },
         )
@@ -562,6 +766,16 @@ pub fn load_project(app: &AppHandle, project_id: &str) -> Result<TacticalProject
         scenes,
         keyframes,
     })
+}
+
+pub fn delete_project(app: &AppHandle, project_id: &str) -> Result<(), DbError> {
+    init_database(app)?;
+    let connection = connect(app)?;
+    let deleted = connection.execute("DELETE FROM project WHERE id = ?1", params![project_id])?;
+    if deleted == 0 {
+        return Err(DbError::MissingProject(project_id.to_string()));
+    }
+    Ok(())
 }
 
 pub fn create_export_job(

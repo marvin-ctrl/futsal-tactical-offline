@@ -1,5 +1,6 @@
 use crate::models::{KeyframePayload, ScenePayload, TacticalProjectPayload};
 use font8x8::{BASIC_FONTS, UnicodeFonts};
+use image::imageops::{crop_imm, overlay, resize, rotate90, rotate270, FilterType};
 use image::{ImageError, Rgba, RgbaImage};
 use imageproc::drawing::{
     draw_filled_circle_mut, draw_filled_rect_mut, draw_hollow_circle_mut, draw_hollow_rect_mut,
@@ -33,8 +34,14 @@ pub struct RenderSequenceResult {
 #[derive(Debug, Clone, Copy)]
 enum CourtType {
     Full,
-    Half,
+    HalfAttacking,
+    HalfDefending,
 }
+
+const LOGICAL_RENDER_WIDTH: u32 = 1000;
+const LOGICAL_RENDER_HEIGHT: u32 = 500;
+const HALF_CROP_X: u32 = 500;
+const HALF_CROP_SIZE: u32 = 500;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -191,7 +198,8 @@ pub fn render_project_frame_at(
 
 fn parse_court_type(project: &TacticalProjectPayload) -> CourtType {
     match project.meta.court_type.as_deref() {
-        Some("half") => CourtType::Half,
+        Some("half") | Some("half-attacking") => CourtType::HalfAttacking,
+        Some("half-defending") => CourtType::HalfDefending,
         _ => CourtType::Full,
     }
 }
@@ -342,7 +350,7 @@ fn fallback_fill_color(drawable_type: &str) -> [u8; 3] {
     match drawable_type {
         "player" => [45, 106, 79],
         "goalkeeper" => [239, 71, 111],
-        "ball" => [244, 211, 94],
+        "ball" => [248, 250, 252],
         "cone" => [255, 159, 28],
         "zone" => [245, 158, 11],
         "arrow" | "line" => [56, 189, 248],
@@ -369,8 +377,8 @@ fn default_stroke_width(drawable_type: &str) -> f32 {
 
 fn default_dimensions(drawable_type: &str) -> (f32, f32) {
     match drawable_type {
-        "player" | "goalkeeper" => (28.0, 28.0),
-        "ball" => (12.0, 12.0),
+        "player" | "goalkeeper" => (24.0, 24.0),
+        "ball" => (10.0, 10.0),
         "cone" => (10.0, 10.0),
         "zone" => (120.0, 70.0),
         "arrow" | "line" => (80.0, 0.0),
@@ -440,29 +448,47 @@ fn interpolate_style(a: &RenderStyle, b: &RenderStyle, t: f32) -> RenderStyle {
 }
 
 fn render_frame(width: u32, height: u32, court_type: CourtType, drawables: &[RenderDrawable]) -> RgbaImage {
-    let mut image = RgbaImage::new(width, height);
+    let mut image = RgbaImage::new(LOGICAL_RENDER_WIDTH, LOGICAL_RENDER_HEIGHT);
     draw_pitch_background(&mut image);
-    draw_court(&mut image, court_type);
+    draw_full_court(&mut image);
 
     for drawable in drawables {
         draw_drawable(&mut image, drawable);
     }
 
-    image
+    match court_type {
+        CourtType::Full => resize(&image, width, height, FilterType::Triangle),
+        CourtType::HalfAttacking | CourtType::HalfDefending => {
+            let cropped = if matches!(court_type, CourtType::HalfDefending) {
+                crop_imm(&image, 0, 0, HALF_CROP_SIZE, HALF_CROP_SIZE).to_image()
+            } else {
+                crop_imm(&image, HALF_CROP_X, 0, HALF_CROP_SIZE, HALF_CROP_SIZE).to_image()
+            };
+            let rotated = if matches!(court_type, CourtType::HalfDefending) {
+                rotate270(&cropped)
+            } else {
+                rotate90(&cropped)
+            };
+            let square_size = width.min(height).max(1);
+            let scaled = resize(&rotated, square_size, square_size, FilterType::Triangle);
+            let mut framed = RgbaImage::from_pixel(width, height, RUNOFF_COLOR);
+            let offset_x = ((width - square_size) / 2) as i64;
+            let offset_y = ((height - square_size) / 2) as i64;
+            overlay(&mut framed, &scaled, offset_x, offset_y);
+            framed
+        }
+    }
 }
+
+const RUNOFF_COLOR: Rgba<u8> = Rgba([191, 110, 43, 255]);
+const SURFACE_COLOR: Rgba<u8> = Rgba([19, 136, 184, 255]);
+const LINE_COLOR: Rgba<u8> = Rgba([248, 252, 255, 255]);
 
 fn draw_pitch_background(canvas: &mut RgbaImage) {
     let width = canvas.width();
     let height = canvas.height();
     if let Some(rect) = rect_from_points(0.0, 0.0, width as f32, height as f32) {
-        draw_filled_rect_mut(canvas, rect, Rgba([191, 110, 43, 255]));
-    }
-}
-
-fn draw_court(canvas: &mut RgbaImage, court_type: CourtType) {
-    match court_type {
-        CourtType::Full => draw_full_court(canvas),
-        CourtType::Half => draw_half_court(canvas),
+        draw_filled_rect_mut(canvas, rect, RUNOFF_COLOR);
     }
 }
 
@@ -474,8 +500,8 @@ fn draw_full_court(canvas: &mut RgbaImage) {
     let top = margin;
     let right = width - margin;
     let bottom = height - margin;
-    let line_color = Rgba([11, 16, 32, 255]);
-    let surface_color = Rgba([19, 136, 184, 255]);
+    let line_color = LINE_COLOR;
+    let surface_color = SURFACE_COLOR;
     let unit = ((right - left) / 40.0).min((bottom - top) / 20.0);
     let center_x = width * 0.5;
     let center_y = height * 0.5;
@@ -593,127 +619,7 @@ fn draw_full_court(canvas: &mut RgbaImage) {
     );
 
     draw_substitution_marks(canvas, left, right, bottom, unit, line_color);
-    draw_touchline_distance_marks(canvas, left, right, top, bottom, unit, line_color);
-}
-
-fn draw_half_court(canvas: &mut RgbaImage) {
-    let width = canvas.width() as f32;
-    let height = canvas.height() as f32;
-    let margin = width.min(height) * 0.045;
-    let left = margin;
-    let top = margin;
-    let right = width - margin;
-    let bottom = height - margin;
-    let line_color = Rgba([11, 16, 32, 255]);
-    let surface_color = Rgba([19, 136, 184, 255]);
-    let unit = ((right - left) / 20.0).min((bottom - top) / 20.0);
-    let center_x = width * 0.5;
-    let goal_width = 3.0 * unit;
-    let goal_depth = 1.0 * unit;
-    let penalty_radius = 6.0 * unit;
-    let penalty_dist = 6.0 * unit;
-    let penalty_join_half = 1.58 * unit;
-    let penalty_join_left = center_x - penalty_join_half;
-    let penalty_join_right = center_x + penalty_join_half;
-
-    if let Some(surface) = rect_from_points(left, top, right, bottom) {
-        draw_filled_rect_mut(canvas, surface, surface_color);
-    }
-
-    if let Some(outer) = rect_from_points(left, top, right, bottom) {
-        draw_hollow_rect_mut(canvas, outer, line_color);
-    }
-
-    let half_line_y = bottom - 0.5 * unit;
-    draw_styled_line(
-        canvas,
-        (left, half_line_y),
-        (right, half_line_y),
-        line_color,
-        2,
-        false,
-    );
-
-    let goal_left = center_x - (goal_width * 0.5);
-    let goal_right = goal_left + goal_width;
-    draw_styled_line(
-        canvas,
-        (goal_left, top - 6.0),
-        (goal_right, top - 6.0),
-        line_color,
-        2,
-        false,
-    );
-    draw_outline_rect_thick(
-        canvas,
-        goal_left,
-        top - goal_depth,
-        goal_right,
-        top,
-        line_color,
-        2,
-    );
-
-    let left_post_x = center_x - goal_width * 0.5;
-    let right_post_x = center_x + goal_width * 0.5;
-    let left_join_angle = ((penalty_dist).atan2(penalty_join_left - left_post_x)) * (180.0 / PI);
-    let right_join_angle = ((penalty_dist).atan2(penalty_join_right - right_post_x)) * (180.0 / PI);
-    draw_arc(
-        canvas,
-        (left_post_x, top),
-        penalty_radius.round() as i32,
-        180.0,
-        left_join_angle,
-        line_color,
-        2,
-    );
-    draw_arc(
-        canvas,
-        (right_post_x, top),
-        penalty_radius.round() as i32,
-        right_join_angle,
-        0.0,
-        line_color,
-        2,
-    );
-    draw_styled_line(
-        canvas,
-        (penalty_join_left, top + penalty_dist),
-        (penalty_join_right, top + penalty_dist),
-        line_color,
-        2,
-        false,
-    );
-
-    let mark = (center_x, top + penalty_dist);
-    let second_mark = (center_x, top + 10.0 * unit);
-    draw_filled_circle_mut(
-        canvas,
-        (mark.0.round() as i32, mark.1.round() as i32),
-        4,
-        line_color,
-    );
-    draw_filled_circle_mut(
-        canvas,
-        (second_mark.0.round() as i32, second_mark.1.round() as i32),
-        4,
-        line_color,
-    );
-
-    let center_radius = (3.0 * unit).round() as i32;
-    draw_arc(
-        canvas,
-        (center_x, half_line_y),
-        center_radius,
-        180.0,
-        360.0,
-        line_color,
-        2,
-    );
-
-    let corner_radius = (0.25 * unit).max(2.0).round() as i32;
-    draw_arc(canvas, (left, top), corner_radius, 0.0, 90.0, line_color, 2);
-    draw_arc(canvas, (right, top), corner_radius, 90.0, 180.0, line_color, 2);
+    draw_goal_line_distance_marks(canvas, left, right, top, bottom, unit, line_color, true, true);
 }
 
 fn draw_futsal_penalty_area(
@@ -811,7 +717,7 @@ fn draw_substitution_marks(
     }
 }
 
-fn draw_touchline_distance_marks(
+fn draw_goal_line_distance_marks(
     canvas: &mut RgbaImage,
     left: f32,
     right: f32,
@@ -819,27 +725,33 @@ fn draw_touchline_distance_marks(
     bottom: f32,
     unit: f32,
     line_color: Rgba<u8>,
+    draw_left: bool,
+    draw_right: bool,
 ) {
     let offset = 5.0 * unit;
     let mark_len = (0.6 * unit).max(8.0);
     let marks_y = [top + offset, bottom - offset];
     for mark_y in marks_y {
-        draw_styled_line(
-            canvas,
-            (left - mark_len * 0.5, mark_y),
-            (left + mark_len, mark_y),
-            line_color,
-            2,
-            false,
-        );
-        draw_styled_line(
-            canvas,
-            (right - mark_len, mark_y),
-            (right + mark_len * 0.5, mark_y),
-            line_color,
-            2,
-            false,
-        );
+        if draw_left {
+            draw_styled_line(
+                canvas,
+                (left - mark_len * 0.5, mark_y),
+                (left + mark_len, mark_y),
+                line_color,
+                2,
+                false,
+            );
+        }
+        if draw_right {
+            draw_styled_line(
+                canvas,
+                (right - mark_len, mark_y),
+                (right + mark_len * 0.5, mark_y),
+                line_color,
+                2,
+                false,
+            );
+        }
     }
 }
 
@@ -922,14 +834,24 @@ fn draw_connection(canvas: &mut RgbaImage, drawable: &RenderDrawable, with_arrow
         (drawable.x + drawable.width, drawable.y + drawable.height)
     };
 
-    draw_styled_line(
-        canvas,
-        start,
-        end,
-        drawable.style.stroke,
-        drawable.style.stroke_width,
-        drawable.style.dashed,
-    );
+    if is_dribble_style(drawable) {
+        draw_wavy_line(
+            canvas,
+            start,
+            end,
+            drawable.style.stroke,
+            drawable.style.stroke_width.max(3),
+        );
+    } else {
+        draw_styled_line(
+            canvas,
+            start,
+            end,
+            drawable.style.stroke,
+            drawable.style.stroke_width,
+            drawable.style.dashed,
+        );
+    }
 
     if with_arrow_head {
         draw_arrow_head(canvas, start, end, drawable.style.stroke, drawable.style.stroke_width);
@@ -944,7 +866,7 @@ fn draw_connection(canvas: &mut RgbaImage, drawable: &RenderDrawable, with_arrow
 
 fn draw_player(canvas: &mut RgbaImage, drawable: &RenderDrawable, is_goalkeeper: bool) {
     let center = (drawable.x.round() as i32, drawable.y.round() as i32);
-    let radius = ((drawable.width.max(drawable.height) * 0.5).max(10.0)).round() as i32;
+    let radius = resolve_player_radius(drawable);
 
     let fill = if is_goalkeeper {
         lerp_color(drawable.style.fill, Rgba([239, 71, 111, 255]), 0.35)
@@ -986,13 +908,62 @@ fn draw_player(canvas: &mut RgbaImage, drawable: &RenderDrawable, is_goalkeeper:
 
 fn draw_ball(canvas: &mut RgbaImage, drawable: &RenderDrawable) {
     let center = (drawable.x.round() as i32, drawable.y.round() as i32);
-    let radius = ((drawable.width.max(drawable.height) * 0.5).max(5.0)).round() as i32;
+    let radius = resolve_ball_radius(drawable);
+    let fill = Rgba([248, 250, 252, drawable.style.fill.0[3]]);
+    let seam = Rgba([15, 23, 42, drawable.style.stroke.0[3]]);
 
-    draw_filled_circle_mut(canvas, center, radius, drawable.style.fill);
-    draw_hollow_circle_mut(canvas, center, radius, drawable.style.stroke);
+    draw_filled_circle_mut(canvas, center, radius, fill);
+    draw_hollow_circle_mut(canvas, center, radius, seam);
+    draw_arc(
+        canvas,
+        (drawable.x - radius as f32 * 0.12, drawable.y),
+        (radius as f32 * 0.5).round() as i32,
+        80.0,
+        280.0,
+        seam,
+        1,
+    );
+    draw_arc(
+        canvas,
+        (drawable.x + radius as f32 * 0.12, drawable.y),
+        (radius as f32 * 0.5).round() as i32,
+        -100.0,
+        100.0,
+        seam,
+        1,
+    );
+    draw_styled_line(
+        canvas,
+        (
+            drawable.x - radius as f32 * 0.18,
+            drawable.y - radius as f32 * 0.48,
+        ),
+        (
+            drawable.x + radius as f32 * 0.18,
+            drawable.y + radius as f32 * 0.48,
+        ),
+        seam,
+        1,
+        false,
+    );
+}
 
-    let inner = (radius as f32 * 0.35).round() as i32;
-    draw_filled_circle_mut(canvas, center, inner.max(1), drawable.style.stroke);
+fn resolve_player_radius(drawable: &RenderDrawable) -> i32 {
+    let diameter = drawable
+        .width
+        .max(drawable.height)
+        .min(24.0)
+        .max(18.0);
+    (diameter * 0.5).round() as i32
+}
+
+fn resolve_ball_radius(drawable: &RenderDrawable) -> i32 {
+    let diameter = drawable
+        .width
+        .max(drawable.height)
+        .min(10.0)
+        .max(8.0);
+    (diameter * 0.5).round() as i32
 }
 
 fn draw_cone(canvas: &mut RgbaImage, drawable: &RenderDrawable) {
@@ -1120,6 +1091,40 @@ fn draw_dashed_line(
     }
 }
 
+fn draw_wavy_line(
+    canvas: &mut RgbaImage,
+    start: (f32, f32),
+    end: (f32, f32),
+    color: Rgba<u8>,
+    thickness: i32,
+) {
+    let dx = end.0 - start.0;
+    let dy = end.1 - start.1;
+    let distance = (dx * dx + dy * dy).sqrt();
+    if distance <= f32::EPSILON {
+        return;
+    }
+
+    let unit_x = dx / distance;
+    let unit_y = dy / distance;
+    let normal_x = -unit_y;
+    let normal_y = unit_x;
+    let amplitude = (thickness as f32 * 1.8).max(5.0);
+    let wavelength = 28.0;
+    let cycles = (distance / wavelength).max(1.5);
+    let steps = ((distance / 8.0).ceil() as i32).max(16);
+    let mut previous = start;
+
+    for step in 1..=steps {
+        let t = step as f32 / steps as f32;
+        let base = (start.0 + unit_x * distance * t, start.1 + unit_y * distance * t);
+        let offset = (t * PI * 2.0 * cycles).sin() * amplitude;
+        let point = (base.0 + normal_x * offset, base.1 + normal_y * offset);
+        draw_thick_line(canvas, previous, point, color, thickness.max(1));
+        previous = point;
+    }
+}
+
 fn draw_thick_line(
     canvas: &mut RgbaImage,
     start: (f32, f32),
@@ -1186,6 +1191,13 @@ fn draw_arrow_head(
 
     draw_thick_line(canvas, end, left, color, thickness.max(1));
     draw_thick_line(canvas, end, right, color, thickness.max(1));
+}
+
+fn is_dribble_style(drawable: &RenderDrawable) -> bool {
+    drawable.drawable_type == "arrow"
+        && drawable.style.stroke.0[0] == 244
+        && drawable.style.stroke.0[1] == 211
+        && drawable.style.stroke.0[2] == 94
 }
 
 fn line_endpoints(drawable: &RenderDrawable) -> (f32, f32, f32, f32) {
@@ -1449,8 +1461,15 @@ mod tests {
             meta: ProjectMetaPayload {
                 id: "project_test".to_string(),
                 name: "Renderer Test".to_string(),
+                description: Some("Renderer snapshot fixture".to_string()),
+                category: "attacking pattern".to_string(),
+                restart_type: "none".to_string(),
+                system: Some("3-1".to_string()),
+                age_band: Some("senior".to_string()),
+                tags: vec!["fixture".to_string()],
+                source_template_id: Some("blank-board".to_string()),
                 court_type: court_type.map(str::to_string),
-                schema_version: 2,
+                schema_version: 3,
                 created_at: "2026-02-19T00:00:00Z".to_string(),
                 updated_at: "2026-02-19T00:00:00Z".to_string(),
             },

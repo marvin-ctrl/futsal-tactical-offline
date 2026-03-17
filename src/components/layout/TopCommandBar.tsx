@@ -1,4 +1,5 @@
 import type { TacticalProject } from "../../types/domain";
+import { getCourtTypeLabel } from "../../lib/uiLabels";
 
 const EXPORT_PRESET_LABELS: Record<string, string> = {
   "720p30": "720p / 30fps",
@@ -13,6 +14,7 @@ interface TopCommandBarProps {
   exportPreset: string;
   onOpenProjectDialog: () => void;
   onSaveProject: () => void;
+  onPresentPlay: () => void;
   onQueueExport: () => void;
   onOpenFieldPanel: () => void;
   onOpenExportPanel: () => void;
@@ -25,6 +27,7 @@ export function TopCommandBar({
   exportPreset,
   onOpenProjectDialog,
   onSaveProject,
+  onPresentPlay,
   onQueueExport,
   onOpenFieldPanel,
   onOpenExportPanel
@@ -32,10 +35,10 @@ export function TopCommandBar({
   return (
     <div className="command-bar">
       <div className="command-bar__identity">
-        <p className="eyebrow">Offline Tactical Studio</p>
+        <p className="eyebrow">Offline Play Studio</p>
         <h1>{project.meta.name}</h1>
         <p className="command-bar__meta">
-          Schema v{project.meta.schemaVersion} · {project.scenes.length} scene{project.scenes.length === 1 ? "" : "s"} · Saved:{" "}
+          Schema v{project.meta.schemaVersion} · {project.scenes.length} step{project.scenes.length === 1 ? "" : "s"} · Saved:{" "}
           {persistStatus}
         </p>
       </div>
@@ -43,7 +46,7 @@ export function TopCommandBar({
       <div className="command-bar__controls">
         <div className="command-group">
           <button type="button" className="button button--ghost" onClick={onOpenProjectDialog}>
-            Project
+            Play
           </button>
           <button type="button" className="button" onClick={onSaveProject}>
             Save
@@ -52,10 +55,13 @@ export function TopCommandBar({
 
         <div className="command-group">
           <button type="button" className="button button--ghost" onClick={onOpenFieldPanel}>
-            Field: {project.meta.courtType === "half" ? "Half Court" : "Full Court"}
+            Field: {getCourtTypeLabel(project.meta.courtType)}
           </button>
           <button type="button" className="button button--ghost" onClick={onOpenExportPanel}>
             Export: {EXPORT_PRESET_LABELS[exportPreset] ?? exportPreset}
+          </button>
+          <button type="button" className="button button--ghost" onClick={onPresentPlay}>
+            Present
           </button>
           <button type="button" className="button button--accent" onClick={onQueueExport}>
             Queue MP4 Export

@@ -5,9 +5,16 @@ const now = new Date().toISOString();
 export const defaultProject: TacticalProject = {
   meta: {
     id: "project_local_seed",
-    name: "Sprint 0 Prototype",
+    name: "Build-Up Pattern",
+    description: "Sample attacking pattern for rehearsing the first progression into the middle third.",
+    category: "attacking pattern",
+    restartType: "none",
+    system: "3-1",
+    ageBand: "senior",
+    tags: ["build-up", "sample"],
+    sourceTemplateId: "blank-board",
     courtType: "full",
-    schemaVersion: 2,
+    schemaVersion: 3,
     createdAt: now,
     updatedAt: now
   },
@@ -48,7 +55,7 @@ export const defaultProject: TacticalProject = {
           rotation: 0,
           style: {
             stroke: "#111827",
-            fill: "#f4d35e",
+            fill: "#f8fafc",
             strokeWidth: 1,
             opacity: 1
           }
@@ -132,7 +139,7 @@ export const defaultProject: TacticalProject = {
           rotation: 0,
           style: {
             stroke: "#111827",
-            fill: "#f4d35e",
+            fill: "#f8fafc",
             strokeWidth: 1,
             opacity: 1
           }

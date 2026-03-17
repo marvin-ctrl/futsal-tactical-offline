@@ -7,6 +7,14 @@ export interface SampledTimelineState {
   drawables: Drawable[];
 }
 
+export interface ScenePlaybackWindow {
+  sceneId: string;
+  sceneName: string;
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+}
+
 export function timelineSanityIssues(project: TacticalProject): string[] {
   const issues: string[] = [];
 
@@ -46,7 +54,7 @@ export function timelineSanityIssues(project: TacticalProject): string[] {
   return issues;
 }
 
-interface SceneWindow {
+interface SceneWindow extends ScenePlaybackWindow {
   sceneId: string;
   sceneName: string;
   startMs: number;
@@ -92,6 +100,10 @@ export function sampleTimelineAt(project: TacticalProject, playbackMs: number): 
     localTimestampMs,
     drawables
   };
+}
+
+export function listScenePlaybackWindows(project: TacticalProject): ScenePlaybackWindow[] {
+  return buildSceneWindows(project).map(({ keyframes: _keyframes, ...window }) => window);
 }
 
 function buildSceneWindows(project: TacticalProject): SceneWindow[] {

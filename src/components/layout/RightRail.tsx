@@ -1,5 +1,6 @@
-import type { Drawable, ExportJob, TacticalProject } from "../../types/domain";
+import type { CourtType, Drawable, ExportJob, TacticalProject } from "../../types/domain";
 import type { ActiveSidePanel, ActiveTool } from "../../types/ui";
+import { getToolLabel } from "../../lib/uiLabels";
 
 interface RightRailProps {
   activeSidePanel: ActiveSidePanel;
@@ -12,7 +13,7 @@ interface RightRailProps {
   exportPreset: string;
   sceneNote: string;
   onSelectPanel: (panel: ActiveSidePanel) => void;
-  onSetCourtType: (courtType: "full" | "half") => void;
+  onSetCourtType: (courtType: CourtType) => void;
   onSetExportPreset: (preset: string) => void;
   onQueueExport: () => void;
   onRefreshExports: () => void;
@@ -86,7 +87,7 @@ export function RightRail({
           <h2>Inspector</h2>
           <p>
             {selectedCount === 0
-              ? `Active tool: ${activeTool[0].toUpperCase() + activeTool.slice(1)}`
+              ? `Active tool: ${getToolLabel(activeTool)}`
               : `${selectedCount} object${selectedCount === 1 ? "" : "s"} selected`}
           </p>
           {selectedSummary.length > 0 ? (
@@ -111,20 +112,34 @@ export function RightRail({
           <p>Keep court setup here so the command bar stays focused on project actions.</p>
           <div className="panel-field">
             <span>Court Preset</span>
-            <label className="select-shell">
-              <span className="sr-only">Court preset</span>
-              <select
-                value={project.meta.courtType ?? "full"}
-                onChange={(event) => onSetCourtType(event.target.value as "full" | "half")}
+            <div className="field-mode-row" role="group" aria-label="Court preset">
+              <button
+                type="button"
+                className={`button ${project.meta.courtType === "full" || !project.meta.courtType ? "button--accent" : "button--ghost"}`}
+                onClick={() => onSetCourtType("full")}
               >
-                <option value="full">Full Court</option>
-                <option value="half">Half Court</option>
-              </select>
-            </label>
+                Full
+              </button>
+              <button
+                type="button"
+                className={`button ${project.meta.courtType === "half-attacking" ? "button--accent" : "button--ghost"}`}
+                onClick={() => onSetCourtType("half-attacking")}
+              >
+                Attack Focus
+              </button>
+              <button
+                type="button"
+                className={`button ${project.meta.courtType === "half-defending" ? "button--accent" : "button--ghost"}`}
+                onClick={() => onSetCourtType("half-defending")}
+              >
+                Defend Focus
+              </button>
+            </div>
           </div>
           <ul className="inspector-list">
-            <li>Full court uses both penalty areas and substitution marks.</li>
-            <li>Half court keeps the board tighter for set-piece rehearsal.</li>
+            <li>Full court shows the complete futsal board with both penalty areas.</li>
+            <li>Attacking Half Focus rotates the far half into a portrait coaching view without remapping stored positions.</li>
+            <li>Defending Half Focus does the same for your own half so defensive spacing is easier to read.</li>
           </ul>
         </section>
       ) : null}

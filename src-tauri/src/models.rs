@@ -6,6 +6,13 @@ use serde_json::Value;
 pub struct ProjectMetaPayload {
     pub id: String,
     pub name: String,
+    pub description: Option<String>,
+    pub category: String,
+    pub restart_type: String,
+    pub system: Option<String>,
+    pub age_band: Option<String>,
+    pub tags: Vec<String>,
+    pub source_template_id: Option<String>,
     pub court_type: Option<String>,
     pub schema_version: i64,
     pub created_at: String,
@@ -43,6 +50,13 @@ pub struct TacticalProjectPayload {
 pub struct ProjectRow {
     pub id: String,
     pub name: String,
+    pub description: Option<String>,
+    pub category: String,
+    pub restart_type: String,
+    pub system: Option<String>,
+    pub age_band: Option<String>,
+    pub tags: Vec<String>,
+    pub scene_count: i64,
     pub updated_at: String,
 }
 

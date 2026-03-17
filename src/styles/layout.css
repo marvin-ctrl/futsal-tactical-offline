@@ -46,7 +46,7 @@ textarea:focus-visible {
 }
 
 .app-frame--no-left {
-  grid-template-columns: minmax(0, 1fr) 308px;
+  grid-template-columns: minmax(0, 1fr) 292px;
 }
 
 .app-frame__texture {
@@ -87,7 +87,7 @@ textarea:focus-visible {
 }
 
 .viewport-compact.app-frame--no-left {
-  grid-template-columns: minmax(0, 1fr) 286px;
+  grid-template-columns: minmax(0, 1fr) 270px;
 }
 
 .viewport-fallback {

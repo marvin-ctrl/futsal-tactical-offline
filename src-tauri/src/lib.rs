@@ -37,6 +37,12 @@ fn load_project(app: AppHandle, project_id: String) -> Result<TacticalProjectPay
 }
 
 #[tauri::command]
+fn delete_project(app: AppHandle, project_id: String) -> Result<String, String> {
+    db::delete_project(&app, &project_id).map_err(|error| error.to_string())?;
+    Ok(project_id)
+}
+
+#[tauri::command]
 fn list_export_jobs(app: AppHandle, project_id: String) -> Result<Vec<ExportJobPayload>, String> {
     db::list_export_jobs(&app, &project_id).map_err(|error| error.to_string())
 }
@@ -406,6 +412,7 @@ pub fn run() {
             list_projects,
             save_project,
             load_project,
+            delete_project,
             list_export_jobs,
             get_export_job,
             cancel_export_job,

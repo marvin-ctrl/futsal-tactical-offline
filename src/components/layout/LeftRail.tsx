@@ -7,8 +7,8 @@ interface LeftRailProps {
 }
 
 const leftRailItems: Array<{ id: ActiveSidePanel; label: string; hint: string }> = [
-  { id: "boards", label: "Workspace", hint: "Current board context" },
-  { id: "projects", label: "Projects", hint: "Open saved work" },
+  { id: "inspector", label: "Inspector", hint: "Current board context" },
+  { id: "notes", label: "Notes", hint: "Offline scene notes" },
   { id: "field", label: "Field", hint: "Court settings" },
   { id: "export", label: "Export", hint: "Jobs and output" }
 ];

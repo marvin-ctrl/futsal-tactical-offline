@@ -1,7 +1,29 @@
 import type { Drawable, Keyframe, TacticalProject, UUID } from "../types/domain";
+import {
+  DEFAULT_PLAY_CATEGORY,
+  DEFAULT_RESTART_TYPE,
+  isAgeBand,
+  isPlayCategory,
+  isRestartType,
+  isSystemType,
+  sanitizeTags
+} from "./playMetadata";
 import { sampleTimelineAt } from "./timeline";
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
+
+function normalizeCourtType(courtType: TacticalProject["meta"]["courtType"] | "half" | undefined) {
+  switch (courtType) {
+    case "half":
+    case "half-attacking":
+      return "half-attacking";
+    case "half-defending":
+      return "half-defending";
+    case "full":
+    default:
+      return "full";
+  }
+}
 
 export function migrateProjectToCurrent(project: TacticalProject): TacticalProject {
   const schemaVersion = project.meta.schemaVersion ?? 1;
@@ -25,7 +47,14 @@ export function normalizeProject(project: TacticalProject, schemaVersion = CURRE
     ...project,
     meta: {
       ...project.meta,
-      courtType: project.meta.courtType ?? "full",
+      description: project.meta.description?.trim() ?? "",
+      category: isPlayCategory(project.meta.category) ? project.meta.category : DEFAULT_PLAY_CATEGORY,
+      restartType: isRestartType(project.meta.restartType) ? project.meta.restartType : DEFAULT_RESTART_TYPE,
+      system: isSystemType(project.meta.system) ? project.meta.system : undefined,
+      ageBand: isAgeBand(project.meta.ageBand) ? project.meta.ageBand : undefined,
+      tags: sanitizeTags(project.meta.tags),
+      sourceTemplateId: project.meta.sourceTemplateId ?? null,
+      courtType: normalizeCourtType(project.meta.courtType as TacticalProject["meta"]["courtType"] | "half" | undefined),
       schemaVersion,
       createdAt: project.meta.createdAt,
       updatedAt: project.meta.updatedAt
