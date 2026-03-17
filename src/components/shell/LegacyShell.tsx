@@ -21,7 +21,9 @@ interface LegacyShellProps {
   onInitDatabase: () => void;
   onSaveProject: () => void;
   onLoadProject: () => void;
-  onQueueExport: () => void;
+  onQueuePngExport: () => void;
+  onQueuePdfExport: () => void;
+  onQueueMp4Export: () => void;
   onRefreshExports: () => void;
   onSetCourtType: (courtType: CourtType) => void;
 }
@@ -45,7 +47,9 @@ export function LegacyShell({
   onInitDatabase,
   onSaveProject,
   onLoadProject,
-  onQueueExport,
+  onQueuePngExport,
+  onQueuePdfExport,
+  onQueueMp4Export,
   onRefreshExports,
   onSetCourtType
 }: LegacyShellProps) {
@@ -140,9 +144,15 @@ export function LegacyShell({
       </section>
 
       <section className="panel">
-        <h2>MP4 Export</h2>
+        <h2>Export</h2>
         <div className="button-row">
-          <button type="button" onClick={onQueueExport}>
+          <button type="button" onClick={onQueuePngExport}>
+            Queue PNG Snapshot
+          </button>
+          <button type="button" onClick={onQueuePdfExport}>
+            Queue PDF Snapshot
+          </button>
+          <button type="button" onClick={onQueueMp4Export}>
             Queue MP4 Export
           </button>
           <button type="button" onClick={onRefreshExports}>

@@ -58,6 +58,7 @@ pub fn init_database(app: &AppHandle) -> Result<(), DbError> {
     ensure_project_schema_version_column(&connection)?;
     ensure_project_metadata_schema(&connection)?;
     ensure_export_job_v2_schema(&connection)?;
+    ensure_export_job_request_column(&connection)?;
     seed_sprint_zero_data(&connection)?;
     Ok(())
 }
@@ -119,6 +120,13 @@ fn ignore_duplicate_column(result: Result<usize, rusqlite::Error>) -> Result<(),
         }
     }
     Ok(())
+}
+
+fn ensure_export_job_request_column(connection: &Connection) -> Result<(), DbError> {
+    ignore_duplicate_column(connection.execute(
+        "ALTER TABLE export_job ADD COLUMN request_json TEXT",
+        [],
+    ))
 }
 
 fn ensure_export_job_v2_schema(connection: &Connection) -> Result<(), DbError> {
@@ -782,8 +790,10 @@ pub fn create_export_job(
     app: &AppHandle,
     job_id: &str,
     project_id: &str,
-    fps: i64,
+    export_type: &str,
+    fps: Option<i64>,
     resolution: &str,
+    request_json: Option<&str>,
     retry_of_job_id: Option<&str>,
 ) -> Result<ExportJobPayload, DbError> {
     init_database(app)?;
@@ -796,14 +806,23 @@ pub fn create_export_job(
           status,
           fps,
           resolution,
+          request_json,
           retry_of_job_id,
           progress_pct,
           created_at,
           updated_at
          ) VALUES (
-          ?1, ?2, 'mp4', 'queued', ?3, ?4, ?5, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+          ?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?7, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
          )",
-        params![job_id, project_id, fps, resolution, retry_of_job_id],
+        params![
+            job_id,
+            project_id,
+            export_type,
+            fps,
+            resolution,
+            request_json,
+            retry_of_job_id
+        ],
     )?;
 
     get_export_job(app, job_id)
@@ -986,6 +1005,19 @@ pub fn get_export_job(app: &AppHandle, job_id: &str) -> Result<ExportJobPayload,
         .ok_or_else(|| DbError::Validation(format!("export job {} does not exist", job_id)))?;
 
     Ok(job)
+}
+
+pub fn get_export_request_json(app: &AppHandle, job_id: &str) -> Result<Option<String>, DbError> {
+    init_database(app)?;
+    let connection = connect(app)?;
+    connection
+        .query_row(
+            "SELECT request_json FROM export_job WHERE id = ?1",
+            params![job_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .ok_or_else(|| DbError::Validation(format!("export job {} does not exist", job_id)))
 }
 
 pub fn list_export_jobs(app: &AppHandle, project_id: &str) -> Result<Vec<ExportJobPayload>, DbError> {

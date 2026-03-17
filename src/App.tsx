@@ -8,12 +8,20 @@ import { AppFrame } from "./components/layout/AppFrame";
 import { BottomDock } from "./components/layout/BottomDock";
 import { DeletePlayDialog } from "./components/layout/DeletePlayDialog";
 import { DevDrawer } from "./components/layout/DevDrawer";
-import { ProjectDialog } from "./components/layout/ProjectDialog";
+import { ProjectDialog, type ProjectDialogMode } from "./components/layout/ProjectDialog";
 import { RightRail } from "./components/layout/RightRail";
 import { TopCommandBar } from "./components/layout/TopCommandBar";
 import { LegacyShell } from "./components/shell/LegacyShell";
+import {
+  clearAutosaveSnapshot,
+  readAutosaveSnapshot,
+  readLatestAutosaveSnapshot,
+  saveAutosaveSnapshot,
+  shouldRestoreAutosave
+} from "./lib/projectAutosave";
 import { defaultProject } from "./lib/defaultProject";
 import { cacheProjectThumbnail, readProjectThumbnail, removeProjectThumbnail } from "./lib/projectThumbnail";
+import { downloadProjectPackage, parseProjectPackage } from "./lib/projectPackage";
 import { cloneDrawableState, createId, CURRENT_SCHEMA_VERSION, migrateProjectToCurrent } from "./lib/projectSchema";
 import { createProjectFromTemplate, PLAY_TEMPLATES } from "./lib/projectTemplates";
 import { sampleTimelineAt, timelineSanityIssues } from "./lib/timeline";
@@ -21,7 +29,17 @@ import { getCourtTypeLabel, getDrawableTypeLabel } from "./lib/uiLabels";
 import { useEditorState } from "./state/useEditorState";
 import { useUiState } from "./state/useUiState";
 import type { LibraryFilters } from "./components/library/LibraryFiltersBar";
-import type { CourtType, Drawable, ExportJob, Mp4ExportRequest, ProjectMeta, ProjectRow, TacticalProject } from "./types/domain";
+import type {
+  CourtType,
+  Drawable,
+  ExportJob,
+  ExportType,
+  Mp4ExportRequest,
+  ProjectMeta,
+  ProjectRow,
+  StaticExportRequest,
+  TacticalProject
+} from "./types/domain";
 import type { AppView } from "./types/ui";
 
 const PROJECT_FALLBACK_ROW = (project: TacticalProject): ProjectRow => ({
@@ -37,7 +55,6 @@ const PROJECT_FALLBACK_ROW = (project: TacticalProject): ProjectRow => ({
   updatedAt: project.meta.updatedAt
 });
 
-type ProjectDialogMode = "manage" | "rename" | "saveAs";
 type PresentationReturnView = Exclude<AppView, "presentation">;
 
 const INITIAL_LIBRARY_FILTERS: LibraryFilters = {
@@ -47,6 +64,38 @@ const INITIAL_LIBRARY_FILTERS: LibraryFilters = {
   system: "",
   ageBand: ""
 };
+
+const MP4_EXPORT_PRESETS = {
+  "720p30": { width: 1280, height: 720, fps: 30, label: "720p / 30fps" },
+  "1080p30": { width: 1920, height: 1080, fps: 30, label: "1080p / 30fps" },
+  "1080p60": { width: 1920, height: 1080, fps: 60, label: "1080p / 60fps" }
+} as const;
+
+const STATIC_EXPORT_PRESETS = {
+  "720p": { width: 1280, height: 720, label: "720p snapshot" },
+  "1080p": { width: 1920, height: 1080, label: "1080p snapshot" }
+} as const;
+
+type Mp4ExportPreset = keyof typeof MP4_EXPORT_PRESETS;
+type StaticExportPreset = keyof typeof STATIC_EXPORT_PRESETS;
+
+const MP4_EXPORT_PRESET_OPTIONS = Object.entries(MP4_EXPORT_PRESETS).map(([value, preset]) => ({
+  value,
+  label: preset.label
+}));
+
+const STATIC_EXPORT_PRESET_OPTIONS = Object.entries(STATIC_EXPORT_PRESETS).map(([value, preset]) => ({
+  value,
+  label: preset.label
+}));
+
+function formatExportStatus(job: ExportJob): string {
+  return `${job.exportType.toUpperCase()} ${job.status} (${job.progressPct}%)`;
+}
+
+function serializeProject(project: TacticalProject): string {
+  return JSON.stringify(project);
+}
 
 function cloneProjectAsNewCopy(project: TacticalProject, nextName: string): TacticalProject {
   const nextProjectId = createId("project");
@@ -103,13 +152,17 @@ export function App() {
     devDrawer,
     viewportMode,
     shellVersion,
+    rightRailWidth,
+    bottomDockHeight,
     setAppView,
     setActiveTool,
     setSidePanel,
     setBottomTab,
     toggleDevDrawer,
     setViewportMode,
-    setShellVersion
+    setShellVersion,
+    setRightRailWidth,
+    setBottomDockHeight
   } = useUiState();
 
   const [health, setHealth] = useState("not checked");
@@ -118,11 +171,13 @@ export function App() {
   const [loadStatus, setLoadStatus] = useState("not loaded");
   const [exportStatus, setExportStatus] = useState("not queued");
   const [exportJobs, setExportJobs] = useState<ExportJob[]>([]);
+  const [exportFormat, setExportFormat] = useState<ExportType>("mp4");
+  const [mp4ExportPreset, setMp4ExportPreset] = useState<Mp4ExportPreset>("720p30");
+  const [staticExportPreset, setStaticExportPreset] = useState<StaticExportPreset>("1080p");
   const [projectRows, setProjectRows] = useState<ProjectRow[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [interactionCancelToken, setInteractionCancelToken] = useState(0);
-  const [exportPreset, setExportPreset] = useState("720p30");
   const [sceneNote, setSceneNote] = useState("");
   const [projectDialogMode, setProjectDialogMode] = useState<ProjectDialogMode | null>(null);
   const [libraryFilters, setLibraryFilters] = useState<LibraryFilters>(INITIAL_LIBRARY_FILTERS);
@@ -130,7 +185,11 @@ export function App() {
   const [deleteTarget, setDeleteTarget] = useState<ProjectRow | null>(null);
   const [presentationStartMs, setPresentationStartMs] = useState(0);
   const [presentationReturnView, setPresentationReturnView] = useState<PresentationReturnView>("editor");
+  const [persistedProjectSnapshot, setPersistedProjectSnapshot] = useState<string | null>(() =>
+    serializeProject(project)
+  );
 
+  const projectSnapshot = useMemo(() => serializeProject(project), [project]);
   const totalDurationMs = useMemo(
     () => project.scenes.reduce((sum, scene) => sum + scene.durationMs, 0),
     [project]
@@ -194,6 +253,12 @@ export function App() {
     });
   }, [libraryFilters, projectRowsForUi]);
   const recentProjectRows = useMemo(() => projectRowsForUi.slice(0, 6), [projectRowsForUi]);
+  const exportPreset = exportFormat === "mp4" ? mp4ExportPreset : staticExportPreset;
+  const exportPresetOptions =
+    exportFormat === "mp4" ? MP4_EXPORT_PRESET_OPTIONS : STATIC_EXPORT_PRESET_OPTIONS;
+  const exportPresetLabel =
+    exportPresetOptions.find((option) => option.value === exportPreset)?.label ?? exportPreset;
+  const hasUnsavedChanges = persistedProjectSnapshot === null || projectSnapshot !== persistedProjectSnapshot;
   const canUndo = undoStack.length > 0;
   const canRedo = redoStack.length > 0;
 
@@ -237,6 +302,8 @@ export function App() {
     try {
       updateThumbnailCache(project);
       const result = await invoke<string>("save_project", { project });
+      clearAutosaveSnapshot(project.meta.id);
+      setPersistedProjectSnapshot(projectSnapshot);
       setPersistStatus(result);
       resetHistory();
       await refreshProjects();
@@ -258,9 +325,23 @@ export function App() {
         projectId
       });
       const migrated = migrateProjectToCurrent(loadedProject);
-      setProject(migrated);
-      updateThumbnailCache(migrated);
-      setLoadStatus(`loaded ${projectId}`);
+      const autosaveSnapshot = readAutosaveSnapshot(projectId);
+      const restoredProject =
+        autosaveSnapshot && shouldRestoreAutosave(migrated, autosaveSnapshot)
+          ? migrateProjectToCurrent(autosaveSnapshot.project)
+          : migrated;
+
+      if (autosaveSnapshot && !shouldRestoreAutosave(migrated, autosaveSnapshot)) {
+        clearAutosaveSnapshot(projectId);
+      }
+
+      setProject(restoredProject);
+      setPersistedProjectSnapshot(serializeProject(migrated));
+      updateThumbnailCache(restoredProject);
+      setPersistStatus(autosaveSnapshot && restoredProject !== migrated ? "autosaved draft" : "saved");
+      setLoadStatus(
+        autosaveSnapshot && restoredProject !== migrated ? `restored autosave ${projectId}` : `loaded ${projectId}`
+      );
       if (options.targetView === "presentation") {
         setPresentationStartMs(options.presentationStartMs ?? 0);
         setPresentationReturnView(options.returnView ?? "dashboard");
@@ -280,8 +361,7 @@ export function App() {
       });
       setExportJobs(jobs);
       if (jobs.length > 0) {
-        const latest = jobs[0];
-        setExportStatus(`${latest.status} (${latest.progressPct}%)`);
+        setExportStatus(formatExportStatus(jobs[0]));
       } else {
         setExportStatus("no jobs");
       }
@@ -291,11 +371,7 @@ export function App() {
   };
 
   const queueMp4Export = async () => {
-    const preset = {
-      "720p30": { fps: 30, width: 1280, height: 720 },
-      "1080p30": { fps: 30, width: 1920, height: 1080 },
-      "1080p60": { fps: 60, width: 1920, height: 1080 }
-    }[exportPreset] ?? { fps: 30 as const, width: 1280, height: 720 };
+    const preset = MP4_EXPORT_PRESETS[mp4ExportPreset] ?? MP4_EXPORT_PRESETS["720p30"];
     const request: Mp4ExportRequest = {
       projectId: project.meta.id,
       fps: preset.fps as 30 | 60,
@@ -307,11 +383,56 @@ export function App() {
 
     try {
       const queuedJob = await invoke<ExportJob>("enqueue_mp4_export", { request });
-      setExportStatus(`queued ${queuedJob.id}`);
-      setSidePanel("export");
-      await refreshExportJobs();
+      setExportStatus(`queued ${queuedJob.exportType.toUpperCase()} ${queuedJob.id}`);
+      return queuedJob;
     } catch {
       setExportStatus("export unavailable in web mode");
+      return null;
+    }
+  };
+
+  const queueStaticExport = async (format: Exclude<ExportType, "mp4">) => {
+    const preset = STATIC_EXPORT_PRESETS[staticExportPreset] ?? STATIC_EXPORT_PRESETS["1080p"];
+    const timestampMs = Math.round(playbackMs);
+    const request: StaticExportRequest = {
+      projectId: project.meta.id,
+      width: preset.width,
+      height: preset.height,
+      timestampMs,
+      outputFileName: `${project.meta.id}-${timestampMs}ms.${format}`
+    };
+
+    try {
+      const command = format === "png" ? "enqueue_png_export" : "enqueue_pdf_export";
+      const queuedJob = await invoke<ExportJob>(command, { request });
+      setExportStatus(`queued ${queuedJob.exportType.toUpperCase()} ${queuedJob.id}`);
+      return queuedJob;
+    } catch {
+      setExportStatus("export unavailable in web mode");
+      return null;
+    }
+  };
+
+  const queueSelectedExport = async () => {
+    const queuedJob =
+      exportFormat === "mp4" ? await queueMp4Export() : await queueStaticExport(exportFormat);
+    if (!queuedJob) {
+      return;
+    }
+
+    setSidePanel("export");
+    await refreshExportJobs();
+  };
+
+  const setExportFormatAndSyncPreset = (format: ExportType) => {
+    setExportFormat(format);
+  };
+
+  const setExportPresetForFormat = (preset: string) => {
+    if (exportFormat === "mp4") {
+      setMp4ExportPreset(preset as Mp4ExportPreset);
+    } else {
+      setStaticExportPreset(preset as StaticExportPreset);
     }
   };
 
@@ -324,7 +445,7 @@ export function App() {
   const cancelExportJob = async (jobId: string) => {
     try {
       const job = await invoke<ExportJob>("cancel_export_job", { jobId });
-      setExportStatus(`${job.status} (${job.progressPct}%)`);
+      setExportStatus(formatExportStatus(job));
       await refreshExportJobs();
     } catch {
       setExportStatus("cancel unavailable in web mode");
@@ -334,7 +455,7 @@ export function App() {
   const retryExportJob = async (jobId: string) => {
     try {
       const job = await invoke<ExportJob>("retry_export_job", { jobId });
-      setExportStatus(`queued ${job.id}`);
+      setExportStatus(`queued ${job.exportType.toUpperCase()} ${job.id}`);
       await refreshExportJobs();
     } catch {
       setExportStatus("retry unavailable in web mode");
@@ -393,6 +514,7 @@ export function App() {
     };
     nextProject.scenes[0].projectId = nextProject.meta.id;
     setProject(nextProject);
+    setPersistedProjectSnapshot(null);
     setPlaybackMs(0);
     clearSelection();
     resetHistory();
@@ -405,6 +527,7 @@ export function App() {
   const createPlayFromTemplate = (templateId: string) => {
     const nextProject = createProjectFromTemplate(templateId);
     setProject(nextProject);
+    setPersistedProjectSnapshot(null);
     setPlaybackMs(0);
     clearSelection();
     resetHistory();
@@ -456,6 +579,7 @@ export function App() {
 
     const nextProject = cloneProjectAsNewCopy(project, nextName);
     setProject(nextProject);
+    setPersistedProjectSnapshot(null);
     updateThumbnailCache(nextProject);
     setPersistStatus("save as pending");
     setLoadStatus(`branched ${nextProject.meta.id}`);
@@ -463,6 +587,8 @@ export function App() {
 
     try {
       const result = await invoke<string>("save_project", { project: nextProject });
+      clearAutosaveSnapshot(nextProject.meta.id);
+      setPersistedProjectSnapshot(serializeProject(nextProject));
       setPersistStatus(result);
       await refreshProjects();
     } catch {
@@ -477,8 +603,45 @@ export function App() {
       const duplicatedProject = cloneProjectAsNewCopy(sourceProject, `${sourceProject.meta.name} Copy`);
       updateThumbnailCache(duplicatedProject);
       await invoke<string>("save_project", { project: duplicatedProject });
+      clearAutosaveSnapshot(duplicatedProject.meta.id);
       setPersistStatus(`duplicated ${sourceProject.meta.name}`);
       await refreshProjects();
+    } catch (error) {
+      setPersistStatus(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const exportProjectPackage = () => {
+    try {
+      downloadProjectPackage(project);
+      setPersistStatus(`packaged ${project.meta.name}`);
+    } catch (error) {
+      setPersistStatus(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const importProjectPackage = async (file: File) => {
+    try {
+      const content = await file.text();
+      const parsedProject = parseProjectPackage(content);
+      const importedProject = migrateProjectToCurrent(parsedProject);
+      const localCopy = cloneProjectAsNewCopy(importedProject, importedProject.meta.name);
+
+      setProject(localCopy);
+      setPersistedProjectSnapshot(null);
+      setPlaybackMs(0);
+      clearSelection();
+      resetHistory();
+      updateThumbnailCache(localCopy);
+
+      const result = await invoke<string>("save_project", { project: localCopy });
+      clearAutosaveSnapshot(localCopy.meta.id);
+      setPersistedProjectSnapshot(serializeProject(localCopy));
+      setPersistStatus(result);
+      setLoadStatus(`imported ${file.name}`);
+      await refreshProjects();
+      setAppView("editor");
+      setProjectDialogMode(null);
     } catch (error) {
       setPersistStatus(error instanceof Error ? error.message : String(error));
     }
@@ -500,6 +663,7 @@ export function App() {
     const projectId = deleteTarget.id;
     try {
       await invoke<string>("delete_project", { projectId });
+      clearAutosaveSnapshot(projectId);
       removeProjectThumbnail(projectId);
       setThumbnailById((current) => {
         const next = { ...current };
@@ -684,18 +848,65 @@ export function App() {
   }, [activeTool]);
 
   useEffect(() => {
+    if (!hasUnsavedChanges) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      saveAutosaveSnapshot(project);
+      setPersistStatus("autosaved draft");
+    }, 1200);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [hasUnsavedChanges, project]);
+
+  useEffect(() => {
     let isCancelled = false;
     const run = async () => {
       await Promise.all([checkHealth(), initDatabase(), refreshProjects(), refreshExportJobs()]);
       if (isCancelled) {
         return;
       }
+
+      const latestAutosave = readLatestAutosaveSnapshot();
+      if (!latestAutosave) {
+        return;
+      }
+
+      const autosavedProject = migrateProjectToCurrent(latestAutosave.project);
+      let savedProject: TacticalProject | null = null;
+
+      try {
+        const loadedProject = await invoke<TacticalProject>("load_project", {
+          projectId: autosavedProject.meta.id
+        });
+        savedProject = migrateProjectToCurrent(loadedProject);
+      } catch {
+        savedProject = null;
+      }
+
+      if (!shouldRestoreAutosave(savedProject, latestAutosave)) {
+        clearAutosaveSnapshot(autosavedProject.meta.id);
+        return;
+      }
+
+      setProject(autosavedProject);
+      setPersistedProjectSnapshot(savedProject ? serializeProject(savedProject) : null);
+      setPlaybackMs(0);
+      clearSelection();
+      resetHistory();
+      updateThumbnailCache(autosavedProject);
+      setPersistStatus("autosaved draft");
+      setLoadStatus(`restored autosave ${autosavedProject.meta.id}`);
+      setAppView("editor");
     };
     void run();
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [clearSelection, resetHistory, setAppView, setProject, setPlaybackMs]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -708,8 +919,7 @@ export function App() {
         if (!isCancelled) {
           setExportJobs(jobs);
           if (jobs.length > 0) {
-            const latest = jobs[0];
-            setExportStatus(`${latest.status} (${latest.progressPct}%)`);
+            setExportStatus(formatExportStatus(jobs[0]));
           }
         }
       } catch {
@@ -841,7 +1051,9 @@ export function App() {
         onInitDatabase={initDatabase}
         onSaveProject={saveProjectToLocal}
         onLoadProject={() => loadProjectFromLocal(project.meta.id)}
-        onQueueExport={queueMp4Export}
+        onQueuePngExport={() => queueStaticExport("png")}
+        onQueuePdfExport={() => queueStaticExport("pdf")}
+        onQueueMp4Export={queueMp4Export}
         onRefreshExports={refreshExportJobs}
         onSetCourtType={setCourtType}
       />
@@ -907,16 +1119,21 @@ export function App() {
   return (
     <AppFrame
       viewportMode={viewportMode}
+      rightRailWidth={rightRailWidth}
+      bottomDockHeight={bottomDockHeight}
+      onSetRightRailWidth={setRightRailWidth}
+      onSetBottomDockHeight={setBottomDockHeight}
       topBar={
         <TopCommandBar
           project={project}
           exportStatus={exportStatus}
           persistStatus={persistStatus}
-          exportPreset={exportPreset}
+          exportFormat={exportFormat}
+          exportPresetLabel={exportPresetLabel}
           onOpenProjectDialog={openProjectManager}
           onSaveProject={saveProjectToLocal}
           onPresentPlay={presentCurrentPlay}
-          onQueueExport={queueMp4Export}
+          onQueueExport={queueSelectedExport}
           onOpenFieldPanel={() => setSidePanel("field")}
           onOpenExportPanel={() => setSidePanel("export")}
         />
@@ -930,12 +1147,15 @@ export function App() {
           selectedSummary={selectedDrawables.map((drawable) => `${getDrawableTypeLabel(drawable)} · ${drawable.label ?? drawable.id}`)}
           project={project}
           exportJobs={exportJobs}
+          exportFormat={exportFormat}
           exportPreset={exportPreset}
+          exportPresetOptions={exportPresetOptions}
           sceneNote={sceneNote}
           onSelectPanel={setSidePanel}
           onSetCourtType={setCourtType}
-          onSetExportPreset={setExportPreset}
-          onQueueExport={queueMp4Export}
+          onSetExportFormat={setExportFormatAndSyncPreset}
+          onSetExportPreset={setExportPresetForFormat}
+          onQueueExport={queueSelectedExport}
           onRefreshExports={refreshExportJobs}
           onCancelExport={cancelExportJob}
           onRetryExport={retryExportJob}
@@ -1069,6 +1289,8 @@ export function App() {
               toggleDevDrawer();
             }
           }}
+          onExportPackage={exportProjectPackage}
+          onImportPackage={importProjectPackage}
           onStartRename={() => setProjectDialogMode("rename")}
           onStartSaveAs={() => setProjectDialogMode("saveAs")}
           onRenameProject={renameProject}

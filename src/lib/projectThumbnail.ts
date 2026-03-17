@@ -2,9 +2,9 @@ import { drawTacticalFrame } from "./canvasRenderer";
 import { sampleTimelineAt } from "./timeline";
 import type { TacticalProject } from "../types/domain";
 
-export const PROJECT_THUMBNAIL_STORAGE_PREFIX = "play.thumbnail.v3.";
+const PROJECT_THUMBNAIL_STORAGE_PREFIX = "play.thumbnail.v3.";
 
-export function projectThumbnailStorageKey(projectId: string): string {
+function projectThumbnailStorageKey(projectId: string): string {
   return `${PROJECT_THUMBNAIL_STORAGE_PREFIX}${projectId}`;
 }
 

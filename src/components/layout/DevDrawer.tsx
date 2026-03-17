@@ -93,7 +93,7 @@ export function DevDrawer({
           <ul className="inspector-list">
             {exportJobs.slice(0, 4).map((job) => (
               <li key={job.id}>
-                {job.id} · {job.status} · {job.progressPct}%
+                {job.exportType.toUpperCase()} · {job.status} · {job.progressPct}%
               </li>
             ))}
             {exportJobs.length === 0 ? <li>No jobs yet.</li> : null}

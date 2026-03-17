@@ -112,6 +112,13 @@ button:hover {
   background: var(--bg-button-hover);
 }
 
+.app-frame__splitter,
+.app-frame__splitter:hover,
+.app-frame__splitter:focus-visible {
+  background: transparent;
+  box-shadow: none;
+}
+
 .button:disabled,
 button:disabled {
   opacity: 0.48;
@@ -209,6 +216,7 @@ button:disabled {
 
 .inspector-shell {
   min-height: 0;
+  height: 100%;
   padding: var(--space-4);
   align-content: start;
   overflow: auto;
@@ -336,6 +344,7 @@ button:disabled {
 }
 
 .bottom-dock {
+  height: 100%;
   padding: var(--space-3);
   background: var(--bg-dock);
   display: grid;

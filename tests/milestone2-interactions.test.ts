@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { applyCommandToDrawableState } from "../src/lib/editorCommands";
+import { createAutosaveSnapshot, shouldRestoreAutosave } from "../src/lib/projectAutosave";
 import {
   buildCommittedDrawable,
   collectDrawablesInRect,
@@ -13,6 +14,7 @@ import {
   toggleSelection
 } from "../src/lib/editorInteractions";
 import { defaultProject } from "../src/lib/defaultProject";
+import { createProjectPackageFileName, parseProjectPackage } from "../src/lib/projectPackage";
 import { ensureEditableKeyframe } from "../src/lib/projectSchema";
 import { sampleTimelineAt } from "../src/lib/timeline";
 import { useEditorState } from "../src/state/useEditorState";
@@ -231,6 +233,39 @@ test("buildCommittedDrawable stores draw endpoints for arrows", () => {
   assert.equal(arrow.y2, 50);
   assert.equal(arrow.width, 60);
   assert.equal(arrow.height, 20);
+});
+
+test("createProjectPackageFileName sanitizes the play name", () => {
+  assert.equal(createProjectPackageFileName("Press & Pivot"), "press-pivot.futsal-play.json");
+});
+
+test("parseProjectPackage accepts the packaged project envelope", () => {
+  const packageJson = JSON.stringify({
+    format: "futsal-tactical-package",
+    version: 1,
+    exportedAt: "2026-01-01T00:00:00.000Z",
+    project: cloneProject(defaultProject)
+  });
+
+  const parsed = parseProjectPackage(packageJson);
+  assert.equal(parsed.meta.id, defaultProject.meta.id);
+  assert.equal(parsed.scenes.length, defaultProject.scenes.length);
+});
+
+test("shouldRestoreAutosave returns true when there is no saved project", () => {
+  const snapshot = createAutosaveSnapshot(cloneProject(defaultProject));
+  assert.equal(shouldRestoreAutosave(null, snapshot), true);
+});
+
+test("shouldRestoreAutosave prefers the newer autosaved project", () => {
+  const savedProject = cloneProject(defaultProject);
+  savedProject.meta.updatedAt = "2026-01-01T00:00:00.000Z";
+
+  const autosavedProject = cloneProject(defaultProject);
+  autosavedProject.meta.updatedAt = "2026-01-02T00:00:00.000Z";
+  const snapshot = createAutosaveSnapshot(autosavedProject);
+
+  assert.equal(shouldRestoreAutosave(savedProject, snapshot), true);
 });
 
 test("useEditorState auto-creates a keyframe on first edit at an empty timestamp", () => {

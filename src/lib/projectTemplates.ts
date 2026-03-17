@@ -225,7 +225,7 @@ export const PLAY_TEMPLATES: PlayTemplateDefinition[] = [
   }
 ];
 
-export function getTemplateById(templateId: string | null | undefined): PlayTemplateDefinition {
+function getTemplateById(templateId: string | null | undefined): PlayTemplateDefinition {
   return PLAY_TEMPLATES.find((template) => template.id === templateId) ?? PLAY_TEMPLATES[0];
 }
 

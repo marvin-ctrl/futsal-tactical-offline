@@ -1,6 +1,11 @@
-import type { CourtType, Drawable, ExportJob, TacticalProject } from "../../types/domain";
+import type { CourtType, Drawable, ExportJob, ExportType, TacticalProject } from "../../types/domain";
 import type { ActiveSidePanel, ActiveTool } from "../../types/ui";
 import { getToolLabel } from "../../lib/uiLabels";
+
+interface ExportPresetOption {
+  value: string;
+  label: string;
+}
 
 interface RightRailProps {
   activeSidePanel: ActiveSidePanel;
@@ -10,10 +15,13 @@ interface RightRailProps {
   selectedSummary: string[];
   project: TacticalProject;
   exportJobs: ExportJob[];
+  exportFormat: ExportType;
   exportPreset: string;
+  exportPresetOptions: ExportPresetOption[];
   sceneNote: string;
   onSelectPanel: (panel: ActiveSidePanel) => void;
   onSetCourtType: (courtType: CourtType) => void;
+  onSetExportFormat: (format: ExportType) => void;
   onSetExportPreset: (preset: string) => void;
   onQueueExport: () => void;
   onRefreshExports: () => void;
@@ -43,10 +51,13 @@ export function RightRail({
   selectedSummary,
   project,
   exportJobs,
+  exportFormat,
   exportPreset,
+  exportPresetOptions,
   sceneNote,
   onSelectPanel,
   onSetCourtType,
+  onSetExportFormat,
   onSetExportPreset,
   onQueueExport,
   onRefreshExports,
@@ -61,11 +72,7 @@ export function RightRail({
   const primarySelection = selectedDrawables[0] ?? null;
   const latestJob = exportJobs[0];
   const exportPresetLabel =
-    {
-      "720p30": "720p / 30fps",
-      "1080p30": "1080p / 30fps",
-      "1080p60": "1080p / 60fps"
-    }[exportPreset] ?? exportPreset;
+    exportPresetOptions.find((option) => option.value === exportPreset)?.label ?? exportPreset;
 
   return (
     <div className="inspector-shell">
@@ -153,18 +160,31 @@ export function RightRail({
                 Refresh
               </button>
               <button type="button" className="button button--accent" onClick={onQueueExport}>
-                Queue
+                Queue {exportFormat.toUpperCase()}
               </button>
             </div>
+          </div>
+          <div className="panel-field">
+            <span>Export Format</span>
+            <label className="select-shell">
+              <span className="sr-only">Export format</span>
+              <select value={exportFormat} onChange={(event) => onSetExportFormat(event.target.value as ExportType)}>
+                <option value="png">PNG Snapshot</option>
+                <option value="pdf">PDF Snapshot</option>
+                <option value="mp4">MP4 Animation</option>
+              </select>
+            </label>
           </div>
           <div className="panel-field">
             <span>Export Preset</span>
             <label className="select-shell">
               <span className="sr-only">Export preset</span>
               <select value={exportPreset} onChange={(event) => onSetExportPreset(event.target.value)}>
-                <option value="720p30">720p / 30fps</option>
-                <option value="1080p30">1080p / 30fps</option>
-                <option value="1080p60">1080p / 60fps</option>
+                {exportPresetOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -172,7 +192,9 @@ export function RightRail({
             {exportJobs.map((job) => (
               <article key={job.id} className="export-job-card">
                 <div>
-                  <strong>{job.id}</strong>
+                  <strong>
+                    {job.exportType.toUpperCase()} · {job.id}
+                  </strong>
                   <p>
                     {job.status} · {job.progressPct}%
                   </p>
@@ -197,14 +219,21 @@ export function RightRail({
           </div>
           <div className="meta-card">
             <h3>Next Queue</h3>
-            <p>{exportPresetLabel}</p>
+            <p>
+              {exportFormat.toUpperCase()} · {exportPresetLabel}
+            </p>
             <p>{project.meta.name}</p>
           </div>
           {latestJob ? (
             <div className="meta-card">
               <h3>Latest Export</h3>
-              <p>{latestJob.status} · {latestJob.progressPct}%</p>
-              <p>{latestJob.resolution ?? "resolution pending"} · {latestJob.fps ?? 30} fps</p>
+              <p>
+                {latestJob.exportType.toUpperCase()} · {latestJob.status} · {latestJob.progressPct}%
+              </p>
+              <p>
+                {latestJob.resolution ?? "resolution pending"}
+                {latestJob.fps ? ` · ${latestJob.fps} fps` : ""}
+              </p>
             </div>
           ) : null}
         </section>

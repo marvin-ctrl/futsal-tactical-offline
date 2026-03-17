@@ -1,13 +1,13 @@
 import type { Drawable, DrawableType, Keyframe, TacticalProject } from "../types/domain";
 
-export interface SampledTimelineState {
+interface SampledTimelineState {
   activeSceneId: string;
   activeSceneName: string;
   localTimestampMs: number;
   drawables: Drawable[];
 }
 
-export interface ScenePlaybackWindow {
+interface ScenePlaybackWindow {
   sceneId: string;
   sceneName: string;
   startMs: number;

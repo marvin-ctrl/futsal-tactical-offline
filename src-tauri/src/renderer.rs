@@ -1,6 +1,6 @@
 use crate::models::{KeyframePayload, ScenePayload, TacticalProjectPayload};
 use font8x8::{BASIC_FONTS, UnicodeFonts};
-use image::imageops::{crop_imm, overlay, resize, rotate90, rotate270, FilterType};
+use image::imageops::{overlay, resize, FilterType};
 use image::{ImageError, Rgba, RgbaImage};
 use imageproc::drawing::{
     draw_filled_circle_mut, draw_filled_rect_mut, draw_hollow_circle_mut, draw_hollow_rect_mut,
@@ -40,8 +40,7 @@ enum CourtType {
 
 const LOGICAL_RENDER_WIDTH: u32 = 1000;
 const LOGICAL_RENDER_HEIGHT: u32 = 500;
-const HALF_CROP_X: u32 = 500;
-const HALF_CROP_SIZE: u32 = 500;
+const HALF_BOARD_SIZE: u32 = 500;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -459,18 +458,14 @@ fn render_frame(width: u32, height: u32, court_type: CourtType, drawables: &[Ren
     match court_type {
         CourtType::Full => resize(&image, width, height, FilterType::Triangle),
         CourtType::HalfAttacking | CourtType::HalfDefending => {
-            let cropped = if matches!(court_type, CourtType::HalfDefending) {
-                crop_imm(&image, 0, 0, HALF_CROP_SIZE, HALF_CROP_SIZE).to_image()
-            } else {
-                crop_imm(&image, HALF_CROP_X, 0, HALF_CROP_SIZE, HALF_CROP_SIZE).to_image()
-            };
-            let rotated = if matches!(court_type, CourtType::HalfDefending) {
-                rotate270(&cropped)
-            } else {
-                rotate90(&cropped)
-            };
+            let mut half_image = RgbaImage::from_pixel(HALF_BOARD_SIZE, HALF_BOARD_SIZE, RUNOFF_COLOR);
+            draw_half_court(&mut half_image);
+            for drawable in drawables {
+                let transformed = transform_drawable_for_half(court_type, drawable);
+                draw_drawable(&mut half_image, &transformed);
+            }
             let square_size = width.min(height).max(1);
-            let scaled = resize(&rotated, square_size, square_size, FilterType::Triangle);
+            let scaled = resize(&half_image, square_size, square_size, FilterType::Triangle);
             let mut framed = RgbaImage::from_pixel(width, height, RUNOFF_COLOR);
             let offset_x = ((width - square_size) / 2) as i64;
             let offset_y = ((height - square_size) / 2) as i64;
@@ -489,6 +484,183 @@ fn draw_pitch_background(canvas: &mut RgbaImage) {
     let height = canvas.height();
     if let Some(rect) = rect_from_points(0.0, 0.0, width as f32, height as f32) {
         draw_filled_rect_mut(canvas, rect, RUNOFF_COLOR);
+    }
+}
+
+fn draw_half_court(canvas: &mut RgbaImage) {
+    let width = canvas.width() as f32;
+    let height = canvas.height() as f32;
+    let margin = width.min(height) * 0.045;
+    let left = margin;
+    let top = margin;
+    let right = width - margin;
+    let bottom = height - margin;
+    let unit = ((right - left) / 20.0).min((bottom - top) / 20.0);
+    let center_x = width * 0.5;
+    let goal_width = 3.0 * unit;
+    let goal_depth = 1.0 * unit;
+    let penalty_radius = 6.0 * unit;
+    let penalty_dist = 6.0 * unit;
+    let second_penalty_dist = 10.0 * unit;
+    let center_radius = (3.0 * unit).round() as i32;
+    let corner_radius = (0.25 * unit).max(2.0).round() as i32;
+    let left_post_x = center_x - goal_width * 0.5;
+    let right_post_x = center_x + goal_width * 0.5;
+    let penalty_join_half = 1.58 * unit;
+    let penalty_join_left = center_x - penalty_join_half;
+    let penalty_join_right = center_x + penalty_join_half;
+    let penalty_join_y = top + penalty_dist;
+
+    if let Some(surface) = rect_from_points(left, top, right, bottom) {
+        draw_filled_rect_mut(canvas, surface, SURFACE_COLOR);
+    }
+
+    if let Some(outer) = rect_from_points(left, top, right, bottom) {
+        draw_hollow_rect_mut(canvas, outer, LINE_COLOR);
+    }
+
+    draw_styled_line(canvas, (left, bottom), (right, bottom), LINE_COLOR, 2, false);
+    draw_arc(canvas, (center_x, bottom), center_radius, 180.0, 360.0, LINE_COLOR, 2);
+    draw_filled_circle_mut(canvas, (center_x.round() as i32, bottom.round() as i32), 3, LINE_COLOR);
+
+    draw_top_goal_penalty_area(
+        canvas,
+        left_post_x,
+        right_post_x,
+        top,
+        penalty_radius,
+        penalty_join_left,
+        penalty_join_right,
+        penalty_join_y,
+    );
+    draw_filled_circle_mut(
+        canvas,
+        (center_x.round() as i32, (top + penalty_dist).round() as i32),
+        4,
+        LINE_COLOR,
+    );
+    draw_filled_circle_mut(
+        canvas,
+        (center_x.round() as i32, (top + second_penalty_dist).round() as i32),
+        4,
+        LINE_COLOR,
+    );
+
+    draw_outline_rect_thick(
+        canvas,
+        center_x - goal_width * 0.5,
+        top - goal_depth,
+        center_x + goal_width * 0.5,
+        top,
+        LINE_COLOR,
+        2,
+    );
+
+    draw_arc(canvas, (left, top), corner_radius, 0.0, 90.0, LINE_COLOR, 2);
+    draw_arc(canvas, (right, top), corner_radius, 90.0, 180.0, LINE_COLOR, 2);
+    draw_top_goal_distance_marks(canvas, left, right, top, unit, LINE_COLOR);
+}
+
+fn draw_top_goal_penalty_area(
+    canvas: &mut RgbaImage,
+    left_post_x: f32,
+    right_post_x: f32,
+    top: f32,
+    penalty_radius: f32,
+    join_left: f32,
+    join_right: f32,
+    join_y: f32,
+) {
+    let left_join_angle = ((join_y - top).atan2(join_left - left_post_x)) * (180.0 / PI);
+    let right_join_angle = ((join_y - top).atan2(join_right - right_post_x)) * (180.0 / PI);
+
+    draw_arc(
+        canvas,
+        (left_post_x, top),
+        penalty_radius.round() as i32,
+        180.0,
+        left_join_angle,
+        LINE_COLOR,
+        2,
+    );
+    draw_arc(
+        canvas,
+        (right_post_x, top),
+        penalty_radius.round() as i32,
+        0.0,
+        right_join_angle,
+        LINE_COLOR,
+        2,
+    );
+    draw_styled_line(canvas, (join_left, join_y), (join_right, join_y), LINE_COLOR, 2, false);
+}
+
+fn draw_top_goal_distance_marks(
+    canvas: &mut RgbaImage,
+    left: f32,
+    right: f32,
+    top: f32,
+    unit: f32,
+    line_color: Rgba<u8>,
+) {
+    let mark_y = top + 5.0 * unit;
+    let mark_len = (0.6 * unit).max(8.0);
+    draw_styled_line(
+        canvas,
+        (left - mark_len * 0.5, mark_y),
+        (left + mark_len, mark_y),
+        line_color,
+        2,
+        false,
+    );
+    draw_styled_line(
+        canvas,
+        (right - mark_len, mark_y),
+        (right + mark_len * 0.5, mark_y),
+        line_color,
+        2,
+        false,
+    );
+}
+
+fn transform_drawable_for_half(court_type: CourtType, drawable: &RenderDrawable) -> RenderDrawable {
+    let (x, y) = map_half_point(court_type, drawable.x, drawable.y);
+    let (x2, y2, width, height) = if let (Some(raw_x2), Some(raw_y2)) = (drawable.x2, drawable.y2) {
+        let (next_x2, next_y2) = map_half_point(court_type, raw_x2, raw_y2);
+        (Some(next_x2), Some(next_y2), next_x2 - x, next_y2 - y)
+    } else {
+        let (next_x2, next_y2) =
+            map_half_point(court_type, drawable.x + drawable.width, drawable.y + drawable.height);
+        (None, None, next_x2 - x, next_y2 - y)
+    };
+
+    RenderDrawable {
+        drawable_type: drawable.drawable_type.clone(),
+        x,
+        y,
+        x2,
+        y2,
+        rotation: transform_half_rotation(court_type, drawable.rotation),
+        width,
+        height,
+        label: drawable.label.clone(),
+        style: drawable.style.clone(),
+    }
+}
+
+fn map_half_point(court_type: CourtType, x: f32, y: f32) -> (f32, f32) {
+    match court_type {
+        CourtType::HalfAttacking => (y, LOGICAL_RENDER_WIDTH as f32 - x),
+        CourtType::HalfDefending => (y, x),
+        CourtType::Full => (x, y),
+    }
+}
+
+fn transform_half_rotation(court_type: CourtType, rotation: f32) -> f32 {
+    match court_type {
+        CourtType::HalfAttacking => rotation - 90.0,
+        CourtType::HalfDefending => 90.0 - rotation,
+        CourtType::Full => rotation,
     }
 }
 

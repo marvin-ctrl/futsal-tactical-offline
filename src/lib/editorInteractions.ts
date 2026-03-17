@@ -7,7 +7,7 @@ export interface Point {
   y: number;
 }
 
-export interface CanvasSize {
+interface CanvasSize {
   width: number;
   height: number;
 }
@@ -244,7 +244,7 @@ export function hitTestDrawables(drawables: Drawable[], point: Point): Drawable 
   return null;
 }
 
-export function isPointInsideDrawable(drawable: Drawable, point: Point): boolean {
+function isPointInsideDrawable(drawable: Drawable, point: Point): boolean {
   switch (drawable.type) {
     case "player":
     case "goalkeeper":

@@ -17,6 +17,8 @@ interface ProjectDialogProps {
   onLoadProject: (projectId: string) => void;
   onOpenDashboard: () => void;
   onOpenDiagnostics: () => void;
+  onExportPackage: () => void;
+  onImportPackage: (file: File) => void | Promise<void>;
   onStartRename: () => void;
   onStartSaveAs: () => void;
   onRenameProject: (name: string) => void;
@@ -41,6 +43,8 @@ export function ProjectDialog({
   onLoadProject,
   onOpenDashboard,
   onOpenDiagnostics,
+  onExportPackage,
+  onImportPackage,
   onStartRename,
   onStartSaveAs,
   onRenameProject,
@@ -55,6 +59,7 @@ export function ProjectDialog({
   const [ageBand, setAgeBand] = useState(project.meta.ageBand ?? "");
   const [tagsInput, setTagsInput] = useState(project.meta.tags.join(", "));
   const inputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const isNamingMode = mode === "rename" || mode === "saveAs";
 
   useEffect(() => {
@@ -134,6 +139,16 @@ export function ProjectDialog({
                 <button type="button" className="button button--accent" onClick={onNewProject}>
                   New Play
                 </button>
+                <button type="button" className="button button--ghost" onClick={onExportPackage}>
+                  Export Package
+                </button>
+                <button
+                  type="button"
+                  className="button button--ghost"
+                  onClick={() => importInputRef.current?.click()}
+                >
+                  Import Package
+                </button>
                 <button type="button" className="button button--ghost" onClick={onOpenDashboard}>
                   Dashboard
                 </button>
@@ -147,6 +162,20 @@ export function ProjectDialog({
                   Diagnostics
                 </button>
               </div>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".json,application/json"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) {
+                    return;
+                  }
+                  void onImportPackage(file);
+                  event.target.value = "";
+                }}
+              />
             </section>
 
             <section className="project-dialog__section">

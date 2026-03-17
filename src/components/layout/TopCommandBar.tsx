@@ -1,17 +1,12 @@
-import type { TacticalProject } from "../../types/domain";
+import type { ExportType, TacticalProject } from "../../types/domain";
 import { getCourtTypeLabel } from "../../lib/uiLabels";
-
-const EXPORT_PRESET_LABELS: Record<string, string> = {
-  "720p30": "720p / 30fps",
-  "1080p30": "1080p / 30fps",
-  "1080p60": "1080p / 60fps"
-};
 
 interface TopCommandBarProps {
   project: TacticalProject;
   exportStatus: string;
   persistStatus: string;
-  exportPreset: string;
+  exportFormat: ExportType;
+  exportPresetLabel: string;
   onOpenProjectDialog: () => void;
   onSaveProject: () => void;
   onPresentPlay: () => void;
@@ -24,7 +19,8 @@ export function TopCommandBar({
   project,
   exportStatus,
   persistStatus,
-  exportPreset,
+  exportFormat,
+  exportPresetLabel,
   onOpenProjectDialog,
   onSaveProject,
   onPresentPlay,
@@ -58,19 +54,21 @@ export function TopCommandBar({
             Field: {getCourtTypeLabel(project.meta.courtType)}
           </button>
           <button type="button" className="button button--ghost" onClick={onOpenExportPanel}>
-            Export: {EXPORT_PRESET_LABELS[exportPreset] ?? exportPreset}
+            Export: {exportFormat.toUpperCase()} · {exportPresetLabel}
           </button>
           <button type="button" className="button button--ghost" onClick={onPresentPlay}>
             Present
           </button>
           <button type="button" className="button button--accent" onClick={onQueueExport}>
-            Queue MP4 Export
+            Queue {exportFormat.toUpperCase()} Export
           </button>
         </div>
       </div>
 
       <div className="command-bar__status">
-        <span className="status-pill">Preset {EXPORT_PRESET_LABELS[exportPreset] ?? exportPreset}</span>
+        <span className="status-pill">
+          {exportFormat.toUpperCase()} {exportPresetLabel}
+        </span>
         <span className="status-pill">Export {exportStatus}</span>
       </div>
     </div>

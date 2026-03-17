@@ -14,6 +14,8 @@ export type AgeBand = "youth" | "academy" | "senior" | "pro";
 
 export type CourtType = "full" | "half-attacking" | "half-defending";
 
+export type ExportType = "png" | "pdf" | "mp4";
+
 export type DrawableType =
   | "player"
   | "goalkeeper"
@@ -102,7 +104,7 @@ export interface ProjectRow {
 export interface ExportJob {
   id: UUID;
   projectId: UUID;
-  exportType: "png" | "pdf" | "mp4" | string;
+  exportType: ExportType | string;
   status: "queued" | "running" | "canceling" | "canceled" | "succeeded" | "failed";
   fps?: number;
   resolution?: string;
@@ -125,4 +127,12 @@ export interface Mp4ExportRequest {
   durationMs: number;
   outputFileName?: string;
   inputPattern?: string;
+}
+
+export interface StaticExportRequest {
+  projectId: UUID;
+  width: number;
+  height: number;
+  timestampMs: number;
+  outputFileName?: string;
 }

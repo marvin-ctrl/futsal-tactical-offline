@@ -20,14 +20,6 @@ export interface SelectionState {
   ids: UUID[];
 }
 
-export interface TransformState {
-  mode: "idle" | "marquee" | "dragging" | "drawing";
-  originX?: number;
-  originY?: number;
-  currentX?: number;
-  currentY?: number;
-}
-
 export type ActiveSidePanel = "inspector" | "field" | "text" | "notes" | "effects" | "export";
 
 export type BottomDockTab = "edit" | "animation";

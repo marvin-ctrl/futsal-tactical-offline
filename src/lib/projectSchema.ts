@@ -85,13 +85,13 @@ export function createId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export interface ScenePlaybackContext {
+interface ScenePlaybackContext {
   sceneId: string;
   sceneName: string;
   localTimestampMs: number;
 }
 
-export function resolveScenePlaybackContext(
+function resolveScenePlaybackContext(
   project: TacticalProject,
   playbackMs: number
 ): ScenePlaybackContext | null {
@@ -107,7 +107,7 @@ export function resolveScenePlaybackContext(
   };
 }
 
-export interface EditableKeyframeResolution {
+interface EditableKeyframeResolution {
   keyframeId: string;
   project: TacticalProject;
   createdKeyframe: Keyframe | null;

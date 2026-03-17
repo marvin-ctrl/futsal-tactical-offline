@@ -74,6 +74,30 @@ pub struct Mp4ExportRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StaticExportRequest {
+    pub project_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub timestamp_ms: u64,
+    pub output_file_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportRequestPayload {
+    pub export_type: String,
+    pub project_id: String,
+    pub fps: Option<u32>,
+    pub width: u32,
+    pub height: u32,
+    pub duration_ms: Option<u64>,
+    pub timestamp_ms: Option<u64>,
+    pub output_file_name: Option<String>,
+    pub input_pattern: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExportJobPayload {
     pub id: String,
     pub project_id: String,
