@@ -1,6 +1,6 @@
 use crate::models::{
-    ExportJobPayload, KeyframePayload, ProjectMetaPayload, ProjectRow, ScenePayload,
-    TacticalProjectPayload,
+    ExportJobPayload, KeyframePayload, ProjectMetaPayload, ProjectRow, SchemaMigrationRow,
+    ScenePayload, TacticalProjectPayload,
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
@@ -601,6 +601,25 @@ pub fn list_projects(app: &AppHandle) -> Result<Vec<ProjectRow>, DbError> {
             tags,
             scene_count: row.get(8)?,
             updated_at: row.get(9)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+pub fn list_schema_migrations(app: &AppHandle) -> Result<Vec<SchemaMigrationRow>, DbError> {
+    init_database(app)?;
+    let connection = connect(app)?;
+    let mut statement = connection.prepare(
+        "SELECT id, applied_at
+         FROM schema_migration
+         ORDER BY id ASC",
+    )?;
+
+    let rows = statement.query_map([], |row| {
+        Ok(SchemaMigrationRow {
+            id: row.get(0)?,
+            applied_at: row.get(1)?,
         })
     })?;
 

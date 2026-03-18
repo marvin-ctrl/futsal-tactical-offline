@@ -4,8 +4,8 @@ pub mod renderer;
 
 use image::{codecs::jpeg::JpegEncoder, DynamicImage, ExtendedColorType, RgbaImage};
 use models::{
-    ExportJobPayload, ExportRequestPayload, Mp4ExportRequest, ProjectRow, StaticExportRequest,
-    TacticalProjectPayload,
+    ExportJobPayload, ExportRequestPayload, Mp4ExportRequest, ProjectRow, SchemaMigrationRow,
+    StaticExportRequest, TacticalProjectPayload,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +27,11 @@ fn init_database(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn list_projects(app: AppHandle) -> Result<Vec<ProjectRow>, String> {
     db::list_projects(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_schema_migrations(app: AppHandle) -> Result<Vec<SchemaMigrationRow>, String> {
+    db::list_schema_migrations(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -697,6 +702,7 @@ pub fn run() {
             healthcheck,
             init_database,
             list_projects,
+            list_schema_migrations,
             save_project,
             load_project,
             delete_project,

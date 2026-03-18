@@ -1,5 +1,10 @@
 import type { ExportJob } from "../../types/domain";
 
+interface SchemaMigrationRow {
+  id: string;
+  appliedAt: string;
+}
+
 interface DevDrawerProps {
   isOpen: boolean;
   health: string;
@@ -8,6 +13,7 @@ interface DevDrawerProps {
   loadStatus: string;
   exportStatus: string;
   exportJobs: ExportJob[];
+  schemaMigrations: SchemaMigrationRow[];
   shellVersion: "legacy" | "v2";
   onCheckHealth: () => void;
   onInitDatabase: () => void;
@@ -23,6 +29,7 @@ export function DevDrawer({
   loadStatus,
   exportStatus,
   exportJobs,
+  schemaMigrations,
   shellVersion,
   onCheckHealth,
   onInitDatabase,
@@ -97,6 +104,18 @@ export function DevDrawer({
               </li>
             ))}
             {exportJobs.length === 0 ? <li>No jobs yet.</li> : null}
+          </ul>
+        </section>
+
+        <section className="inspector-card">
+          <h3>Migrations</h3>
+          <ul className="inspector-list">
+            {schemaMigrations.map((migration) => (
+              <li key={migration.id}>
+                {migration.id} · {migration.appliedAt}
+              </li>
+            ))}
+            {schemaMigrations.length === 0 ? <li>No migration data.</li> : null}
           </ul>
         </section>
       </div>

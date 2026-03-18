@@ -60,6 +60,7 @@ const PROJECT_FALLBACK_ROW = (project: TacticalProject): ProjectRow => ({
 });
 
 type PresentationReturnView = Exclude<AppView, "presentation">;
+type SchemaMigrationRow = { id: string; appliedAt: string };
 
 const INITIAL_LIBRARY_FILTERS: LibraryFilters = {
   search: "",
@@ -181,6 +182,7 @@ export function App() {
   const [loadStatus, setLoadStatus] = useState("not loaded");
   const [exportStatus, setExportStatus] = useState("not queued");
   const [exportJobs, setExportJobs] = useState<ExportJob[]>([]);
+  const [schemaMigrations, setSchemaMigrations] = useState<SchemaMigrationRow[]>([]);
   const [exportFormat, setExportFormat] = useState<ExportType>("mp4");
   const [mp4ExportPreset, setMp4ExportPreset] = useState<Mp4ExportPreset>("720p30");
   const [staticExportPreset, setStaticExportPreset] = useState<StaticExportPreset>("1080p");
@@ -305,9 +307,26 @@ export function App() {
     try {
       const result = await invoke<string>("init_database");
       setDbStatus(result);
+      if (IS_DEV) {
+        const migrations = await invoke<SchemaMigrationRow[]>("list_schema_migrations");
+        setSchemaMigrations(migrations);
+      }
       await refreshProjects();
     } catch {
       setDbStatus("web mode only");
+    }
+  };
+
+  const refreshSchemaMigrations = async () => {
+    if (!IS_DEV) {
+      return;
+    }
+
+    try {
+      const migrations = await invoke<SchemaMigrationRow[]>("list_schema_migrations");
+      setSchemaMigrations(migrations);
+    } catch {
+      setSchemaMigrations([]);
     }
   };
 
@@ -1061,6 +1080,14 @@ export function App() {
   }, [setViewportMode]);
 
   useEffect(() => {
+    if (!IS_DEV || !devDrawer.open) {
+      return;
+    }
+
+    void refreshSchemaMigrations();
+  }, [devDrawer.open]);
+
+  useEffect(() => {
     if (appView !== "editor") {
       return;
     }
@@ -1327,6 +1354,7 @@ export function App() {
             loadStatus={loadStatus}
             exportStatus={exportStatus}
             exportJobs={exportJobs}
+            schemaMigrations={schemaMigrations}
             shellVersion={activeShellVersion}
             onCheckHealth={checkHealth}
             onInitDatabase={initDatabase}

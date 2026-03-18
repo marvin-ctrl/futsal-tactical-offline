@@ -115,3 +115,10 @@ pub struct ExportJobPayload {
     pub created_at: String,
     pub updated_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaMigrationRow {
+    pub id: String,
+    pub applied_at: String,
+}
