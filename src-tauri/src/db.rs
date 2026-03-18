@@ -8,6 +8,14 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
 
+const MIGRATION_0001_INIT: &str = "0001_init";
+const MIGRATION_0002_EXPORT_CONTROL_AND_SCHEMA_VERSION: &str =
+    "0002_export_control_and_schema_version";
+const MIGRATION_0003_PROJECT_METADATA_AND_LIBRARY: &str =
+    "0003_project_metadata_and_library";
+const MIGRATION_0004_PROJECT_COURT_TYPE_FOCUS: &str = "0004_project_court_type_focus";
+const MIGRATION_0005_EXPORT_JOB_REQUEST: &str = "0005_export_job_request";
+
 #[derive(Debug, Error)]
 pub enum DbError {
     #[error("unable to resolve app data directory")]
@@ -60,12 +68,24 @@ pub fn init_database(app: &AppHandle) -> Result<(), DbError> {
 
 fn init_connection(connection: &Connection) -> Result<(), DbError> {
     connection.execute_batch(include_str!("../migrations/0001_init.sql"))?;
+    ensure_schema_migration_table(connection)?;
     ensure_project_court_type_column(connection)?;
     ensure_project_schema_version_column(connection)?;
     ensure_project_metadata_schema(connection)?;
     ensure_project_court_type_constraint(connection)?;
     ensure_export_job_v2_schema(connection)?;
     ensure_export_job_request_column(connection)?;
+    backfill_schema_migrations(connection)?;
+    Ok(())
+}
+
+fn ensure_schema_migration_table(connection: &Connection) -> Result<(), DbError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_migration (
+           id TEXT PRIMARY KEY,
+           applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         );",
+    )?;
     Ok(())
 }
 
@@ -149,10 +169,16 @@ fn ignore_duplicate_column(result: Result<usize, rusqlite::Error>) -> Result<(),
 }
 
 fn ensure_export_job_request_column(connection: &Connection) -> Result<(), DbError> {
-    ignore_duplicate_column(connection.execute(
-        "ALTER TABLE export_job ADD COLUMN request_json TEXT",
-        [],
-    ))
+    let existing_columns = table_columns(connection, "export_job")?;
+    if existing_columns
+        .iter()
+        .any(|existing| existing == "request_json")
+    {
+        return Ok(());
+    }
+
+    connection.execute_batch(include_str!("../migrations/0005_export_job_request.sql"))?;
+    Ok(())
 }
 
 fn ensure_export_job_v2_schema(connection: &Connection) -> Result<(), DbError> {
@@ -243,6 +269,90 @@ fn table_columns(connection: &Connection, table_name: &str) -> Result<Vec<String
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table_name})"))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+fn table_exists(connection: &Connection, table_name: &str) -> Result<bool, DbError> {
+    let exists = connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table_name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    Ok(exists)
+}
+
+fn project_table_sql(connection: &Connection) -> Result<Option<String>, DbError> {
+    connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(DbError::from)
+}
+
+fn mark_schema_migration(connection: &Connection, migration_id: &str) -> Result<(), DbError> {
+    connection.execute(
+        "INSERT OR IGNORE INTO schema_migration (id) VALUES (?1)",
+        params![migration_id],
+    )?;
+    Ok(())
+}
+
+fn backfill_schema_migrations(connection: &Connection) -> Result<(), DbError> {
+    if table_exists(connection, "project")?
+        && table_exists(connection, "scene")?
+        && table_exists(connection, "keyframe")?
+        && table_exists(connection, "export_job")?
+    {
+        mark_schema_migration(connection, MIGRATION_0001_INIT)?;
+    }
+
+    let project_columns = table_columns(connection, "project")?;
+    let export_job_columns = table_columns(connection, "export_job")?;
+    let project_sql = project_table_sql(connection)?.unwrap_or_default();
+
+    let has_export_v2_columns = ["retry_of_job_id", "cancel_requested_at", "canceled_at", "worker_heartbeat_at"]
+        .iter()
+        .all(|column| export_job_columns.iter().any(|existing| existing == column));
+    if project_columns
+        .iter()
+        .any(|column| column == "schema_version")
+        && has_export_v2_columns
+    {
+        mark_schema_migration(connection, MIGRATION_0002_EXPORT_CONTROL_AND_SCHEMA_VERSION)?;
+    }
+
+    let has_project_metadata_columns = [
+        "description",
+        "category",
+        "restart_type",
+        "system",
+        "age_band",
+        "tags_json",
+        "source_template_id",
+    ]
+    .iter()
+    .all(|column| project_columns.iter().any(|existing| existing == column));
+    if has_project_metadata_columns {
+        mark_schema_migration(connection, MIGRATION_0003_PROJECT_METADATA_AND_LIBRARY)?;
+    }
+
+    if project_sql.contains("half-attacking") && project_sql.contains("half-defending") {
+        mark_schema_migration(connection, MIGRATION_0004_PROJECT_COURT_TYPE_FOCUS)?;
+    }
+
+    if export_job_columns
+        .iter()
+        .any(|column| column == "request_json")
+    {
+        mark_schema_migration(connection, MIGRATION_0005_EXPORT_JOB_REQUEST)?;
+    }
+
+    Ok(())
 }
 
 fn is_valid_category(value: &str) -> bool {
@@ -1101,17 +1211,23 @@ fn map_export_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExportJobPayl
 
 #[cfg(test)]
 mod tests {
-    use super::{init_connection, table_columns};
+    use super::{
+        init_connection, project_table_sql, table_columns, MIGRATION_0001_INIT,
+        MIGRATION_0002_EXPORT_CONTROL_AND_SCHEMA_VERSION,
+        MIGRATION_0003_PROJECT_METADATA_AND_LIBRARY, MIGRATION_0004_PROJECT_COURT_TYPE_FOCUS,
+        MIGRATION_0005_EXPORT_JOB_REQUEST,
+    };
     use rusqlite::{params, Connection};
 
-    fn project_table_sql(connection: &Connection) -> String {
-        connection
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("project table sql should exist")
+    fn applied_migration_ids(connection: &Connection) -> Vec<String> {
+        let mut statement = connection
+            .prepare("SELECT id FROM schema_migration ORDER BY id ASC")
+            .expect("schema_migration query should prepare");
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("schema_migration query should run")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("schema_migration rows should collect")
     }
 
     #[test]
@@ -1120,9 +1236,21 @@ mod tests {
 
         init_connection(&connection).expect("fresh schema init should succeed");
 
-        let table_sql = project_table_sql(&connection);
+        let table_sql = project_table_sql(&connection)
+            .expect("project table sql should load")
+            .expect("project table sql should exist");
         assert!(table_sql.contains("half-attacking"));
         assert!(table_sql.contains("half-defending"));
+        assert_eq!(
+            applied_migration_ids(&connection),
+            vec![
+                MIGRATION_0001_INIT.to_string(),
+                MIGRATION_0002_EXPORT_CONTROL_AND_SCHEMA_VERSION.to_string(),
+                MIGRATION_0003_PROJECT_METADATA_AND_LIBRARY.to_string(),
+                MIGRATION_0004_PROJECT_COURT_TYPE_FOCUS.to_string(),
+                MIGRATION_0005_EXPORT_JOB_REQUEST.to_string(),
+            ]
+        );
 
         connection
             .execute(
@@ -1161,6 +1289,16 @@ mod tests {
         let columns = table_columns(&connection, "project").expect("table columns should load");
         assert!(columns.iter().any(|column| column == "schema_version"));
         assert!(columns.iter().any(|column| column == "description"));
+        assert_eq!(
+            applied_migration_ids(&connection),
+            vec![
+                MIGRATION_0001_INIT.to_string(),
+                MIGRATION_0002_EXPORT_CONTROL_AND_SCHEMA_VERSION.to_string(),
+                MIGRATION_0003_PROJECT_METADATA_AND_LIBRARY.to_string(),
+                MIGRATION_0004_PROJECT_COURT_TYPE_FOCUS.to_string(),
+                MIGRATION_0005_EXPORT_JOB_REQUEST.to_string(),
+            ]
+        );
 
         connection
             .execute(
@@ -1270,6 +1408,16 @@ mod tests {
                 "[\"legacy\"]".to_string(),
                 Some("corner-a".to_string()),
             )
+        );
+        assert_eq!(
+            applied_migration_ids(&connection),
+            vec![
+                MIGRATION_0001_INIT.to_string(),
+                MIGRATION_0002_EXPORT_CONTROL_AND_SCHEMA_VERSION.to_string(),
+                MIGRATION_0003_PROJECT_METADATA_AND_LIBRARY.to_string(),
+                MIGRATION_0004_PROJECT_COURT_TYPE_FOCUS.to_string(),
+                MIGRATION_0005_EXPORT_JOB_REQUEST.to_string(),
+            ]
         );
 
         connection
