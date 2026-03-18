@@ -598,6 +598,7 @@ button:disabled {
 }
 
 .panel-field input[type="text"],
+.panel-field input[type="number"],
 .panel-field textarea {
   width: 100%;
   padding: 0.7rem 0.85rem;
@@ -610,6 +611,46 @@ button:disabled {
 .panel-field textarea {
   resize: vertical;
   min-height: 7rem;
+}
+
+.scene-duration-list {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.scene-duration-row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.scene-duration-row.is-active {
+  border-color: rgba(132, 228, 255, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(132, 228, 255, 0.18);
+}
+
+.scene-duration-row__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.scene-duration-row__name,
+.scene-duration-row__hint {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.scene-duration-row__name {
+  font-size: 0.92rem;
+}
+
+.scene-duration-row__hint {
+  font-size: 0.82rem;
 }
 
 input[type="range"] {

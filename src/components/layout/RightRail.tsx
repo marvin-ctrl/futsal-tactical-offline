@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { CourtType, Drawable, ExportJob, ExportType, TacticalProject } from "../../types/domain";
 import type { ActiveSidePanel, ActiveTool } from "../../types/ui";
 import { getToolLabel } from "../../lib/uiLabels";
@@ -7,6 +8,15 @@ interface ExportPresetOption {
   label: string;
 }
 
+interface SceneDurationRow {
+  id: string;
+  label: string;
+  name: string;
+  durationMs: number;
+  minDurationMs: number;
+  isActive: boolean;
+}
+
 interface RightRailProps {
   activeSidePanel: ActiveSidePanel;
   activeTool: ActiveTool;
@@ -14,6 +24,8 @@ interface RightRailProps {
   selectedDrawables: Drawable[];
   selectedSummary: string[];
   project: TacticalProject;
+  totalDurationMs: number;
+  sceneDurations: SceneDurationRow[];
   exportJobs: ExportJob[];
   exportFormat: ExportType;
   exportPreset: string;
@@ -23,6 +35,7 @@ interface RightRailProps {
   onSetCourtType: (courtType: CourtType) => void;
   onSetExportFormat: (format: ExportType) => void;
   onSetExportPreset: (preset: string) => void;
+  onSetSceneDuration: (sceneId: string, durationSeconds: number) => void;
   onQueueExport: () => void;
   onRefreshExports: () => void;
   onCancelExport: (jobId: string) => void;
@@ -43,6 +56,10 @@ const panelButtons: Array<{ id: ActiveSidePanel; label: string }> = [
   { id: "export", label: "Export" }
 ];
 
+function formatDurationSeconds(durationMs: number): string {
+  return String(Math.max(1, Math.round(durationMs / 1000)));
+}
+
 export function RightRail({
   activeSidePanel,
   activeTool,
@@ -50,6 +67,8 @@ export function RightRail({
   selectedDrawables,
   selectedSummary,
   project,
+  totalDurationMs,
+  sceneDurations,
   exportJobs,
   exportFormat,
   exportPreset,
@@ -59,6 +78,7 @@ export function RightRail({
   onSetCourtType,
   onSetExportFormat,
   onSetExportPreset,
+  onSetSceneDuration,
   onQueueExport,
   onRefreshExports,
   onCancelExport,
@@ -73,6 +93,32 @@ export function RightRail({
   const latestJob = exportJobs[0];
   const exportPresetLabel =
     exportPresetOptions.find((option) => option.value === exportPreset)?.label ?? exportPreset;
+  const [sceneDurationDrafts, setSceneDurationDrafts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setSceneDurationDrafts(
+      Object.fromEntries(sceneDurations.map((scene) => [scene.id, formatDurationSeconds(scene.durationMs)]))
+    );
+  }, [sceneDurations]);
+
+  const commitSceneDuration = (sceneId: string) => {
+    const scene = sceneDurations.find((candidate) => candidate.id === sceneId);
+    if (!scene) {
+      return;
+    }
+
+    const draft = sceneDurationDrafts[sceneId] ?? formatDurationSeconds(scene.durationMs);
+    const parsed = Number(draft);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setSceneDurationDrafts((current) => ({
+        ...current,
+        [sceneId]: formatDurationSeconds(scene.durationMs)
+      }));
+      return;
+    }
+
+    onSetSceneDuration(sceneId, parsed);
+  };
 
   return (
     <div className="inspector-shell">
@@ -143,10 +189,53 @@ export function RightRail({
               </button>
             </div>
           </div>
+          <div className="meta-card">
+            <h3>Clip Length</h3>
+            <p>
+              {Math.round(totalDurationMs / 1000)}s across {sceneDurations.length} step{sceneDurations.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          <div className="scene-duration-list">
+            {sceneDurations.map((scene) => (
+              <div key={scene.id} className={`scene-duration-row ${scene.isActive ? "is-active" : ""}`}>
+                <div className="scene-duration-row__header">
+                  <div>
+                    <strong>{scene.label}</strong>
+                    <p className="scene-duration-row__name">{scene.name}</p>
+                  </div>
+                  {scene.isActive ? <span className="status-pill">Active</span> : null}
+                </div>
+                <label className="panel-field">
+                  <span>Duration (seconds)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={sceneDurationDrafts[scene.id] ?? formatDurationSeconds(scene.durationMs)}
+                    onChange={(event) =>
+                      setSceneDurationDrafts((current) => ({
+                        ...current,
+                        [scene.id]: event.target.value
+                      }))
+                    }
+                    onBlur={() => commitSceneDuration(scene.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                </label>
+                <p className="scene-duration-row__hint">
+                  Minimum {Math.round(scene.minDurationMs / 1000)}s to keep the last keyframe reachable.
+                </p>
+              </div>
+            ))}
+          </div>
           <ul className="inspector-list">
             <li>Full court shows the complete futsal board with both penalty areas.</li>
-            <li>Attacking Half Focus rotates the far half into a portrait coaching view without remapping stored positions.</li>
-            <li>Defending Half Focus does the same for your own half so defensive spacing is easier to read.</li>
+            <li>Attacking Half Focus reframes the attacking half without changing the court geometry or stored positions.</li>
+            <li>Defending Half Focus does the same for your own half so defensive spacing stays readable and accurate.</li>
           </ul>
         </section>
       ) : null}

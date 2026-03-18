@@ -140,6 +140,7 @@ export function App() {
     resetHistory,
     setSelection,
     clearSelection,
+    applyProjectUpdate,
     applyCommand,
     undo,
     redo
@@ -218,6 +219,26 @@ export function App() {
       }))
       .sort((left, right) => left.playbackMs - right.playbackMs);
   }, [project]);
+  const sceneDurationRows = useMemo(() => {
+    const maxKeyframeMsBySceneId = new Map<string, number>();
+    project.keyframes.forEach((keyframe) => {
+      maxKeyframeMsBySceneId.set(
+        keyframe.sceneId,
+        Math.max(maxKeyframeMsBySceneId.get(keyframe.sceneId) ?? 0, Math.round(keyframe.timestampMs))
+      );
+    });
+
+    return [...project.scenes]
+      .sort((left, right) => left.orderIndex - right.orderIndex)
+      .map((scene, index) => ({
+        id: scene.id,
+        label: `Step ${index + 1}`,
+        name: scene.name,
+        durationMs: scene.durationMs,
+        minDurationMs: Math.max(1000, Math.ceil((maxKeyframeMsBySceneId.get(scene.id) ?? 0) / 1000) * 1000),
+        isActive: scene.id === sampledState.activeSceneId
+      }));
+  }, [project, sampledState.activeSceneId]);
   const projectRowsForUi = projectRows.length > 0 ? projectRows : [PROJECT_FALLBACK_ROW(project)];
   const filteredProjectRows = useMemo(() => {
     const search = libraryFilters.search.trim().toLowerCase();
@@ -472,6 +493,52 @@ export function App() {
         updatedAt: new Date().toISOString()
       }
     });
+  };
+
+  const setSceneDuration = (sceneId: string, durationSeconds: number) => {
+    const targetScene = project.scenes.find((scene) => scene.id === sceneId);
+    if (!targetScene || !Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      return;
+    }
+
+    const minDurationMs = sceneDurationRows.find((scene) => scene.id === sceneId)?.minDurationMs ?? 1000;
+    const requestedDurationMs = Math.round(durationSeconds) * 1000;
+    const nextDurationMs = Math.max(minDurationMs, requestedDurationMs);
+    if (nextDurationMs === targetScene.durationMs) {
+      return;
+    }
+
+    const nextProject: TacticalProject = {
+      ...project,
+      meta: {
+        ...project.meta,
+        updatedAt: new Date().toISOString()
+      },
+      scenes: project.scenes.map((scene) =>
+        scene.id === sceneId
+          ? {
+              ...scene,
+              durationMs: nextDurationMs
+            }
+          : scene
+      )
+    };
+
+    applyProjectUpdate(nextProject, {
+      label: nextDurationMs > targetScene.durationMs ? "extend step duration" : "shorten step duration",
+      selectionIds: selection.ids
+    });
+
+    const nextTotalDurationMs = nextProject.scenes.reduce((sum, scene) => sum + scene.durationMs, 0);
+    if (playbackMs > nextTotalDurationMs) {
+      setPlaybackMs(nextTotalDurationMs);
+    }
+
+    setPersistStatus(
+      nextDurationMs === requestedDurationMs
+        ? "scene duration updated locally"
+        : `scene duration kept at ${Math.round(minDurationMs / 1000)}s minimum`
+    );
   };
 
   const createNewProject = () => {
@@ -1033,6 +1100,7 @@ export function App() {
         project={project}
         playbackMs={playbackMs}
         totalDurationMs={totalDurationMs}
+        sceneDurations={sceneDurationRows}
         timelineIssues={timelineIssues}
         health={health}
         dbStatus={dbStatus}
@@ -1056,6 +1124,7 @@ export function App() {
         onQueueMp4Export={queueMp4Export}
         onRefreshExports={refreshExportJobs}
         onSetCourtType={setCourtType}
+        onSetSceneDuration={setSceneDuration}
       />
     );
   }
@@ -1146,6 +1215,8 @@ export function App() {
           selectedDrawables={selectedDrawables}
           selectedSummary={selectedDrawables.map((drawable) => `${getDrawableTypeLabel(drawable)} · ${drawable.label ?? drawable.id}`)}
           project={project}
+          totalDurationMs={totalDurationMs}
+          sceneDurations={sceneDurationRows}
           exportJobs={exportJobs}
           exportFormat={exportFormat}
           exportPreset={exportPreset}
@@ -1155,6 +1226,7 @@ export function App() {
           onSetCourtType={setCourtType}
           onSetExportFormat={setExportFormatAndSyncPreset}
           onSetExportPreset={setExportPresetForFormat}
+          onSetSceneDuration={setSceneDuration}
           onQueueExport={queueSelectedExport}
           onRefreshExports={refreshExportJobs}
           onCancelExport={cancelExportJob}

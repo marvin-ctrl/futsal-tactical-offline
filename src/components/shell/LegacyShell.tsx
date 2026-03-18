@@ -2,10 +2,19 @@ import type { CourtType, ExportJob, TacticalProject } from "../../types/domain";
 import { TacticalCanvas } from "../TacticalCanvas";
 import { getCourtTypeLongLabel } from "../../lib/uiLabels";
 
+interface SceneDurationRow {
+  id: string;
+  label: string;
+  name: string;
+  durationMs: number;
+  minDurationMs: number;
+}
+
 interface LegacyShellProps {
   project: TacticalProject;
   playbackMs: number;
   totalDurationMs: number;
+  sceneDurations: SceneDurationRow[];
   timelineIssues: string[];
   health: string;
   dbStatus: string;
@@ -26,12 +35,14 @@ interface LegacyShellProps {
   onQueueMp4Export: () => void;
   onRefreshExports: () => void;
   onSetCourtType: (courtType: CourtType) => void;
+  onSetSceneDuration: (sceneId: string, durationSeconds: number) => void;
 }
 
 export function LegacyShell({
   project,
   playbackMs,
   totalDurationMs,
+  sceneDurations,
   timelineIssues,
   health,
   dbStatus,
@@ -51,7 +62,8 @@ export function LegacyShell({
   onQueuePdfExport,
   onQueueMp4Export,
   onRefreshExports,
-  onSetCourtType
+  onSetCourtType,
+  onSetSceneDuration
 }: LegacyShellProps) {
   return (
     <main className="legacy-shell">
@@ -78,6 +90,27 @@ export function LegacyShell({
           <button type="button" onClick={() => onSetCourtType("half-defending")}>
             Defending Half Focus
           </button>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>Step Durations</h2>
+        <p>Total clip length: {Math.round(totalDurationMs / 1000)}s</p>
+        <div className="panel-field">
+          {sceneDurations.map((scene) => (
+            <label key={scene.id} className="panel-field">
+              <span>
+                {scene.label}: {scene.name} (min {Math.round(scene.minDurationMs / 1000)}s)
+              </span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={Math.max(1, Math.round(scene.durationMs / 1000))}
+                onChange={(event) => onSetSceneDuration(scene.id, Number(event.target.value))}
+              />
+            </label>
+          ))}
         </div>
       </section>
 

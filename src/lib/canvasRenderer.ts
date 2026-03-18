@@ -30,12 +30,11 @@ export interface CourtRenderMapping {
 
 const DASH_LENGTH = 16;
 const DASH_GAP = 10;
-const RUNOFF_COLOR = "#bf6e2b";
+const RUNOFF_COLOR = "#a45f28";
 const SURFACE_COLOR = "#1388b8";
 const LINE_COLOR = "#f8fcff";
 const LOGICAL_WIDTH = 1000;
 const LOGICAL_HEIGHT = 500;
-const HALF_BOARD_SIZE = 500;
 const HALF_FRAME_WIDTH = 980;
 const HALF_FRAME_HEIGHT = 1040;
 const PLAYER_DIAMETER = 24;
@@ -53,30 +52,13 @@ export function drawTacticalFrame(
   context.fillStyle = RUNOFF_COLOR;
   context.fillRect(0, 0, width, height);
 
-  if (normalizedCourtType === "full") {
-    context.save();
-    mapping.applyToContext(context);
-    drawPitchBackground(context, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-    drawFullCourt(context, LOGICAL_WIDTH, LOGICAL_HEIGHT);
-    drawDrawables(context, drawables);
-    context.restore();
-    return;
-  }
-
-  context.save();
-  context.beginPath();
-  context.rect(mapping.contentRect.x, mapping.contentRect.y, mapping.contentRect.width, mapping.contentRect.height);
-  context.clip();
-  context.translate(mapping.contentRect.x, mapping.contentRect.y);
-  context.scale(mapping.contentRect.width / HALF_BOARD_SIZE, mapping.contentRect.height / HALF_BOARD_SIZE);
-  drawPortraitHalfCourt(context, HALF_BOARD_SIZE, HALF_BOARD_SIZE);
-  context.restore();
-
   context.save();
   context.beginPath();
   context.rect(mapping.contentRect.x, mapping.contentRect.y, mapping.contentRect.width, mapping.contentRect.height);
   context.clip();
   mapping.applyToContext(context);
+  drawPitchBackground(context, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+  drawFullCourt(context, LOGICAL_WIDTH, LOGICAL_HEIGHT);
   drawDrawables(context, drawables);
   context.restore();
 }
@@ -93,78 +75,28 @@ export function resolveCourtRenderMapping(
   frameHeight: number
 ): CourtRenderMapping {
   const normalizedCourtType = normalizeCourtType(courtType);
-
-  if (normalizedCourtType === "full") {
-    const scaleX = frameWidth / LOGICAL_WIDTH;
-    const scaleY = frameHeight / LOGICAL_HEIGHT;
-    return {
-      frameWidth,
-      frameHeight,
-      contentRect: { x: 0, y: 0, width: frameWidth, height: frameHeight },
-      frameToWorld: (point) => ({
-        x: clamp(point.x / scaleX, 0, LOGICAL_WIDTH),
-        y: clamp(point.y / scaleY, 0, LOGICAL_HEIGHT)
-      }),
-      worldToFrame: (point) => ({
-        x: point.x * scaleX,
-        y: point.y * scaleY
-      }),
-      applyToContext: (context) => {
-        context.transform(scaleX, 0, 0, scaleY, 0, 0);
-      }
-    };
-  }
-
-  const squareSize = Math.min(frameWidth, frameHeight);
-  const rect = {
-    x: (frameWidth - squareSize) * 0.5,
-    y: (frameHeight - squareSize) * 0.5,
-    width: squareSize,
-    height: squareSize
-  };
-  const scale = squareSize / HALF_BOARD_SIZE;
-
-  if (normalizedCourtType === "half-attacking") {
-    return {
-      frameWidth,
-      frameHeight,
-      contentRect: rect,
-      frameToWorld: (point) => {
-        const localX = clamp((point.x - rect.x) / scale, 0, HALF_BOARD_SIZE);
-        const localY = clamp((point.y - rect.y) / scale, 0, HALF_BOARD_SIZE);
-        return {
-          x: clamp(LOGICAL_WIDTH - localY, HALF_BOARD_SIZE, LOGICAL_WIDTH),
-          y: clamp(localX, 0, LOGICAL_HEIGHT)
-        };
-      },
-      worldToFrame: (point) => ({
-        x: rect.x + point.y * scale,
-        y: rect.y + (LOGICAL_WIDTH - point.x) * scale
-      }),
-      applyToContext: (context) => {
-        context.transform(0, -scale, scale, 0, rect.x, rect.y + LOGICAL_WIDTH * scale);
-      }
-    };
-  }
+  const viewport = resolveWorldViewport(normalizedCourtType);
+  const contentRect =
+    normalizedCourtType === "full"
+      ? { x: 0, y: 0, width: frameWidth, height: frameHeight }
+      : resolveFocusContentRect(frameWidth, frameHeight);
+  const scaleX = contentRect.width / viewport.width;
+  const scaleY = contentRect.height / viewport.height;
 
   return {
     frameWidth,
     frameHeight,
-    contentRect: rect,
-    frameToWorld: (point) => {
-      const localX = clamp((point.x - rect.x) / scale, 0, HALF_BOARD_SIZE);
-      const localY = clamp((point.y - rect.y) / scale, 0, HALF_BOARD_SIZE);
-      return {
-        x: clamp(localY, 0, HALF_BOARD_SIZE),
-        y: clamp(localX, 0, LOGICAL_HEIGHT)
-      };
-    },
+    contentRect,
+    frameToWorld: (point) => ({
+      x: clamp(viewport.x + (point.x - contentRect.x) / scaleX, 0, LOGICAL_WIDTH),
+      y: clamp(viewport.y + (point.y - contentRect.y) / scaleY, 0, LOGICAL_HEIGHT)
+    }),
     worldToFrame: (point) => ({
-      x: rect.x + point.y * scale,
-      y: rect.y + point.x * scale
+      x: contentRect.x + (point.x - viewport.x) * scaleX,
+      y: contentRect.y + (point.y - viewport.y) * scaleY
     }),
     applyToContext: (context) => {
-      context.transform(0, scale, scale, 0, rect.x, rect.y);
+      context.transform(scaleX, 0, 0, scaleY, contentRect.x - viewport.x * scaleX, contentRect.y - viewport.y * scaleY);
     }
   };
 }
@@ -187,89 +119,45 @@ function drawPitchBackground(context: CanvasRenderingContext2D, width: number, h
   context.fillRect(0, 0, width, height);
 }
 
-function drawPortraitHalfCourt(context: CanvasRenderingContext2D, width: number, height: number): void {
-  const margin = Math.min(width, height) * 0.045;
-  const left = margin;
-  const top = margin;
-  const right = width - margin;
-  const bottom = height - margin;
-  const unit = Math.min((right - left) / 20, (bottom - top) / 20);
-  const centerX = width * 0.5;
-  const penaltyRadius = 6 * unit;
-  const penaltyDist = 6 * unit;
-  const secondPenaltyDist = 10 * unit;
-  const goalDepth = 1 * unit;
-  const goalWidth = 3 * unit;
-  const centerRadius = 3 * unit;
-  const cornerRadius = Math.max(2, 0.25 * unit);
-  const leftPostX = centerX - goalWidth * 0.5;
-  const rightPostX = centerX + goalWidth * 0.5;
-  const penaltyJoinHalf = 1.58 * unit;
-  const penaltyJoinLeft = centerX - penaltyJoinHalf;
-  const penaltyJoinRight = centerX + penaltyJoinHalf;
-  const penaltyJoinY = top + penaltyDist;
+function resolveWorldViewport(courtType: CourtType): RenderViewport {
+  if (courtType === "half-attacking") {
+    return {
+      x: LOGICAL_WIDTH * 0.5,
+      y: 0,
+      width: LOGICAL_WIDTH * 0.5,
+      height: LOGICAL_HEIGHT
+    };
+  }
 
-  context.fillStyle = SURFACE_COLOR;
-  context.fillRect(left, top, right - left, bottom - top);
+  if (courtType === "half-defending") {
+    return {
+      x: 0,
+      y: 0,
+      width: LOGICAL_WIDTH * 0.5,
+      height: LOGICAL_HEIGHT
+    };
+  }
 
-  strokeRect(context, left, top, right - left, bottom - top, LINE_COLOR, 2);
-  drawLine(context, left, bottom, right, bottom, LINE_COLOR, 2, false);
-  drawArc(context, centerX, bottom, centerRadius, 180, 360, LINE_COLOR, 2);
-  fillCircle(context, centerX, bottom, 3, LINE_COLOR);
-
-  drawTopGoalPenaltyArea(
-    context,
-    leftPostX,
-    rightPostX,
-    top,
-    penaltyRadius,
-    penaltyJoinLeft,
-    penaltyJoinRight,
-    penaltyJoinY
-  );
-  fillCircle(context, centerX, top + penaltyDist, 4, LINE_COLOR);
-  fillCircle(context, centerX, top + secondPenaltyDist, 4, LINE_COLOR);
-  strokeRect(context, centerX - goalWidth * 0.5, top - goalDepth, goalWidth, goalDepth, LINE_COLOR, 2);
-
-  drawArc(context, left, top, cornerRadius, 0, 90, LINE_COLOR, 2);
-  drawArc(context, right, top, cornerRadius, 90, 180, LINE_COLOR, 2);
-  drawTopGoalDistanceMarks(context, left, right, top, unit, LINE_COLOR);
+  return {
+    x: 0,
+    y: 0,
+    width: LOGICAL_WIDTH,
+    height: LOGICAL_HEIGHT
+  };
 }
 
-function drawTopGoalPenaltyArea(
-  context: CanvasRenderingContext2D,
-  leftPostX: number,
-  rightPostX: number,
-  top: number,
-  penaltyRadius: number,
-  joinLeft: number,
-  joinRight: number,
-  joinY: number
-): void {
-  const leftJoinAngle = (Math.atan2(joinY - top, joinLeft - leftPostX) * 180) / Math.PI;
-  const rightJoinAngle = (Math.atan2(joinY - top, joinRight - rightPostX) * 180) / Math.PI;
-
-  drawArc(context, leftPostX, top, penaltyRadius, 180, leftJoinAngle, LINE_COLOR, 2);
-  drawArc(context, rightPostX, top, penaltyRadius, 0, rightJoinAngle, LINE_COLOR, 2);
-  drawLine(context, joinLeft, joinY, joinRight, joinY, LINE_COLOR, 2, false);
-}
-
-function drawTopGoalDistanceMarks(
-  context: CanvasRenderingContext2D,
-  left: number,
-  right: number,
-  top: number,
-  unit: number,
-  lineColor: string
-): void {
-  const markY = top + 5 * unit;
-  const markLength = Math.max(8, 0.6 * unit);
-  drawLine(context, left - markLength * 0.5, markY, left + markLength, markY, lineColor, 2, false);
-  drawLine(context, right - markLength, markY, right + markLength * 0.5, markY, lineColor, 2, false);
+function resolveFocusContentRect(frameWidth: number, frameHeight: number): RenderViewport {
+  const squareSize = Math.min(frameWidth, frameHeight);
+  return {
+    x: (frameWidth - squareSize) * 0.5,
+    y: (frameHeight - squareSize) * 0.5,
+    width: squareSize,
+    height: squareSize
+  };
 }
 
 function drawFullCourt(context: CanvasRenderingContext2D, width: number, height: number): void {
-  const margin = Math.min(width, height) * 0.045;
+  const margin = Math.min(width, height) * 0.03;
   const left = margin;
   const top = margin;
   const right = width - margin;
@@ -283,10 +171,6 @@ function drawFullCourt(context: CanvasRenderingContext2D, width: number, height:
   const goalDepth = 1 * unit;
   const goalWidth = 3 * unit;
   const cornerRadius = Math.max(2, 0.25 * unit);
-  const penaltyJoinHalf = 1.58 * unit;
-  const penaltyJoinTop = centerY - penaltyJoinHalf;
-  const penaltyJoinBottom = centerY + penaltyJoinHalf;
-
   context.fillStyle = SURFACE_COLOR;
   context.fillRect(left, top, right - left, bottom - top);
 
@@ -316,9 +200,6 @@ function drawFullCourt(context: CanvasRenderingContext2D, width: number, height:
   drawArc(context, right, top, cornerRadius, 90, 180, LINE_COLOR, 2);
   drawArc(context, right, bottom, cornerRadius, 180, 270, LINE_COLOR, 2);
 
-  drawLine(context, left + penaltyDist, penaltyJoinTop, left + penaltyDist, penaltyJoinBottom, LINE_COLOR, 2, false);
-  drawLine(context, right - penaltyDist, penaltyJoinTop, right - penaltyDist, penaltyJoinBottom, LINE_COLOR, 2, false);
-
   drawSubstitutionMarks(context, left, right, bottom, unit, LINE_COLOR);
   drawGoalLineDistanceMarks(context, left, right, top, bottom, unit, LINE_COLOR, "both");
 }
@@ -344,19 +225,22 @@ function drawFutsalPenaltyArea(context: CanvasRenderingContext2D, args: FutsalEn
   const penaltyJoinHalf = 1.58 * unit;
   const penaltyJoinTop = centerY - penaltyJoinHalf;
   const penaltyJoinBottom = centerY + penaltyJoinHalf;
+  const joinX = side === "left" ? left + penaltyDist : right - penaltyDist;
 
   if (side === "left") {
-    const topJoinAngle = (Math.atan2(penaltyJoinTop - topPostY, penaltyDist) * 180) / Math.PI;
-    const bottomJoinAngle = (Math.atan2(penaltyJoinBottom - bottomPostY, penaltyDist) * 180) / Math.PI;
+    const topJoinAngle = (Math.atan2(penaltyJoinTop - topPostY, joinX - left) * 180) / Math.PI;
+    const bottomJoinAngle = (Math.atan2(penaltyJoinBottom - bottomPostY, joinX - left) * 180) / Math.PI;
     drawArc(context, left, topPostY, penaltyRadius, -90, topJoinAngle, lineColor, 2);
     drawArc(context, left, bottomPostY, penaltyRadius, bottomJoinAngle, 90, lineColor, 2);
+    drawLine(context, joinX, penaltyJoinTop, joinX, penaltyJoinBottom, lineColor, 2, false);
     return;
   }
 
-  const topJoinAngle = (Math.atan2(penaltyJoinTop - topPostY, -penaltyDist) * 180) / Math.PI;
-  const bottomJoinAngle = (Math.atan2(penaltyJoinBottom - bottomPostY, -penaltyDist) * 180) / Math.PI;
-  drawArc(context, right, topPostY, penaltyRadius, -90, topJoinAngle, lineColor, 2);
+  const topJoinAngle = (Math.atan2(penaltyJoinTop - topPostY, joinX - right) * 180) / Math.PI;
+  const bottomJoinAngle = (Math.atan2(penaltyJoinBottom - bottomPostY, joinX - right) * 180) / Math.PI;
+  drawArc(context, right, topPostY, penaltyRadius, -90, topJoinAngle, lineColor, 2, true);
   drawArc(context, right, bottomPostY, penaltyRadius, 90, bottomJoinAngle, lineColor, 2);
+  drawLine(context, joinX, penaltyJoinTop, joinX, penaltyJoinBottom, lineColor, 2, false);
 }
 
 function drawSubstitutionMarks(
@@ -371,7 +255,7 @@ function drawSubstitutionMarks(
   const markLength = Math.max(8, 0.8 * unit);
   const marks = [centerX - 10 * unit, centerX - 5 * unit, centerX + 5 * unit, centerX + 10 * unit];
   for (const markX of marks) {
-    drawLine(context, markX, bottom - markLength * 0.4, markX, bottom + markLength, lineColor, 2, false);
+    drawLine(context, markX, bottom - markLength * 0.5, markX, bottom + markLength * 0.5, lineColor, 2, false);
   }
 }
 
@@ -390,10 +274,10 @@ function drawGoalLineDistanceMarks(
   const marksY = [top + offset, bottom - offset];
   for (const markY of marksY) {
     if (side === "both" || side === "left") {
-      drawLine(context, left - markLength * 0.5, markY, left + markLength, markY, lineColor, 2, false);
+      drawLine(context, left - markLength * 0.5, markY, left + markLength * 0.5, markY, lineColor, 2, false);
     }
     if (side === "both" || side === "right") {
-      drawLine(context, right - markLength, markY, right + markLength * 0.5, markY, lineColor, 2, false);
+      drawLine(context, right - markLength * 0.5, markY, right + markLength * 0.5, markY, lineColor, 2, false);
     }
   }
 }
@@ -721,13 +605,21 @@ function drawArc(
   startAngleDeg: number,
   endAngleDeg: number,
   color: string,
-  thickness: number
+  thickness: number,
+  anticlockwise = false
 ): void {
   context.save();
   context.strokeStyle = color;
   context.lineWidth = thickness;
   context.beginPath();
-  context.arc(centerX, centerY, radius, (startAngleDeg * Math.PI) / 180, (endAngleDeg * Math.PI) / 180);
+  context.arc(
+    centerX,
+    centerY,
+    radius,
+    (startAngleDeg * Math.PI) / 180,
+    (endAngleDeg * Math.PI) / 180,
+    anticlockwise
+  );
   context.stroke();
   context.restore();
 }

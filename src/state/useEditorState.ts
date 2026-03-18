@@ -24,6 +24,11 @@ interface ApplyCommandOptions {
   selectionIds?: UUID[];
 }
 
+interface ApplyProjectUpdateOptions {
+  label?: string;
+  selectionIds?: UUID[];
+}
+
 interface EditorState {
   project: TacticalProject;
   playbackMs: number;
@@ -38,6 +43,7 @@ interface EditorState {
   setSelection: (ids: UUID[]) => void;
   clearSelection: () => void;
   setActiveKeyframe: (id: UUID | null) => void;
+  applyProjectUpdate: (project: TacticalProject, options?: ApplyProjectUpdateOptions) => void;
   applyCommand: (command: EditorCommand, options?: ApplyCommandOptions) => void;
   undo: () => void;
   redo: () => void;
@@ -111,6 +117,27 @@ export const useEditorState = create<EditorState>((set, get) => ({
   setSelection: (ids) => set({ selection: { ids: [...new Set(ids)] } }),
   clearSelection: () => set({ selection: { ids: [] } }),
   setActiveKeyframe: (id) => set({ activeKeyframeId: id }),
+  applyProjectUpdate: (project, options) => {
+    const state = get();
+    const nextProject = migrateProjectToCurrent(project);
+    const entry: HistoryEntry = {
+      label: options?.label ?? "update project",
+      before: cloneProject(state.project),
+      after: cloneProject(nextProject),
+      selectionBefore: [...state.selection.ids],
+      selectionAfter: [...(options?.selectionIds ?? state.selection.ids)]
+    };
+
+    set((current) => ({
+      project: nextProject,
+      selection: {
+        ids: options?.selectionIds ?? current.selection.ids
+      },
+      activeKeyframeId: resolveActiveKeyframeId(nextProject, current.playbackMs),
+      undoStack: [...current.undoStack, entry].slice(-HISTORY_LIMIT),
+      redoStack: []
+    }));
+  },
   applyCommand: (command, options) => {
     const state = get();
     const editableResolution = ensureEditableKeyframe(state.project, state.playbackMs);
