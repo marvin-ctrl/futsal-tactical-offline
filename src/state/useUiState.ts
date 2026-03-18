@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { readBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { resolveViewportMode } from "../lib/layout";
 import type { ActiveSidePanel, ActiveTool, AppView, BottomDockTab, DevDrawerState, ViewportMode } from "../types/ui";
 
@@ -25,7 +26,7 @@ interface UiState {
 
 const initialShellVersion =
   typeof window !== "undefined"
-    ? ((window.localStorage.getItem("ui.shellVersion") as "legacy" | "v2" | null) ?? "v2")
+    ? ((readBrowserStorage("ui.shellVersion") as "legacy" | "v2" | null) ?? "v2")
     : "v2";
 
 const DEFAULT_RIGHT_RAIL_WIDTH = 292;
@@ -36,7 +37,7 @@ function readStoredNumber(key: string, fallback: number): number {
     return fallback;
   }
 
-  const value = Number(window.localStorage.getItem(key));
+  const value = Number(readBrowserStorage(key));
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
@@ -66,21 +67,15 @@ export const useUiState = create<UiState>((set) => ({
   setViewportMode: (value) =>
     set({ viewportMode: typeof value === "string" ? value : resolveViewportMode(value) }),
   setShellVersion: (version) => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("ui.shellVersion", version);
-    }
+    writeBrowserStorage("ui.shellVersion", version);
     set({ shellVersion: version });
   },
   setRightRailWidth: (width) => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("ui.rightRailWidth", String(width));
-    }
+    writeBrowserStorage("ui.rightRailWidth", String(width));
     set({ rightRailWidth: width });
   },
   setBottomDockHeight: (height) => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("ui.bottomDockHeight", String(height));
-    }
+    writeBrowserStorage("ui.bottomDockHeight", String(height));
     set({ bottomDockHeight: height });
   }
 }));

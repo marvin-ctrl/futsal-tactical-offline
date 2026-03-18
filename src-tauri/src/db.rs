@@ -53,13 +53,19 @@ fn connect(app: &AppHandle) -> Result<Connection, DbError> {
 
 pub fn init_database(app: &AppHandle) -> Result<(), DbError> {
     let connection = connect(app)?;
-    connection.execute_batch(include_str!("../migrations/0001_init.sql"))?;
-    ensure_project_court_type_column(&connection)?;
-    ensure_project_schema_version_column(&connection)?;
-    ensure_project_metadata_schema(&connection)?;
-    ensure_export_job_v2_schema(&connection)?;
-    ensure_export_job_request_column(&connection)?;
+    init_connection(&connection)?;
     seed_sprint_zero_data(&connection)?;
+    Ok(())
+}
+
+fn init_connection(connection: &Connection) -> Result<(), DbError> {
+    connection.execute_batch(include_str!("../migrations/0001_init.sql"))?;
+    ensure_project_court_type_column(connection)?;
+    ensure_project_schema_version_column(connection)?;
+    ensure_project_metadata_schema(connection)?;
+    ensure_project_court_type_constraint(connection)?;
+    ensure_export_job_v2_schema(connection)?;
+    ensure_export_job_request_column(connection)?;
     Ok(())
 }
 
@@ -109,6 +115,26 @@ fn ensure_project_metadata_schema(connection: &Connection) -> Result<(), DbError
              tags_json = COALESCE(tags_json, '[]')",
         [],
     )?;
+    Ok(())
+}
+
+fn ensure_project_court_type_constraint(connection: &Connection) -> Result<(), DbError> {
+    let Some(table_sql) = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    else {
+        return Ok(());
+    };
+
+    if table_sql.contains("half-attacking") && table_sql.contains("half-defending") {
+        return Ok(());
+    }
+
+    connection.execute_batch(include_str!("../migrations/0004_project_court_type_focus.sql"))?;
     Ok(())
 }
 
@@ -1071,4 +1097,186 @@ fn map_export_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExportJobPayl
         created_at: row.get(13)?,
         updated_at: row.get(14)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{init_connection, table_columns};
+    use rusqlite::{params, Connection};
+
+    fn project_table_sql(connection: &Connection) -> String {
+        connection
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("project table sql should exist")
+    }
+
+    #[test]
+    fn fresh_schema_allows_focused_court_types() {
+        let connection = Connection::open_in_memory().expect("in-memory db should open");
+
+        init_connection(&connection).expect("fresh schema init should succeed");
+
+        let table_sql = project_table_sql(&connection);
+        assert!(table_sql.contains("half-attacking"));
+        assert!(table_sql.contains("half-defending"));
+
+        connection
+            .execute(
+                "INSERT INTO project (id, name, court_type) VALUES (?1, ?2, ?3)",
+                params!["project_attack_focus", "Attack Focus", "half-attacking"],
+            )
+            .expect("fresh schema should accept half-attacking");
+
+        connection
+            .execute(
+                "INSERT INTO project (id, name, court_type) VALUES (?1, ?2, ?3)",
+                params!["project_defend_focus", "Defend Focus", "half-defending"],
+            )
+            .expect("fresh schema should accept half-defending");
+    }
+
+    #[test]
+    fn legacy_minimal_project_schema_is_upgraded_for_focused_court_types() {
+        let connection = Connection::open_in_memory().expect("in-memory db should open");
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+
+                CREATE TABLE project (
+                  id TEXT PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  court_type TEXT NOT NULL DEFAULT 'full' CHECK (court_type IN ('full', 'half')),
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );",
+            )
+            .expect("legacy schema should be created");
+
+        init_connection(&connection).expect("legacy schema upgrade should succeed");
+
+        let columns = table_columns(&connection, "project").expect("table columns should load");
+        assert!(columns.iter().any(|column| column == "schema_version"));
+        assert!(columns.iter().any(|column| column == "description"));
+
+        connection
+            .execute(
+                "INSERT INTO project (id, name, court_type) VALUES (?1, ?2, ?3)",
+                params!["legacy_upgraded", "Legacy Upgraded", "half-attacking"],
+            )
+            .expect("upgraded legacy schema should accept half-attacking");
+    }
+
+    #[test]
+    fn partially_upgraded_project_schema_preserves_rows_and_allows_focus_types() {
+        let connection = Connection::open_in_memory().expect("in-memory db should open");
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+
+                CREATE TABLE project (
+                  id TEXT PRIMARY KEY,
+                  name TEXT NOT NULL,
+                  court_type TEXT NOT NULL DEFAULT 'full' CHECK (court_type IN ('full', 'half')),
+                  schema_version INTEGER NOT NULL DEFAULT 1,
+                  description TEXT NOT NULL DEFAULT '',
+                  category TEXT NOT NULL DEFAULT 'attacking pattern',
+                  restart_type TEXT NOT NULL DEFAULT 'none',
+                  system TEXT,
+                  age_band TEXT,
+                  tags_json TEXT NOT NULL DEFAULT '[]',
+                  source_template_id TEXT,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                INSERT INTO project (
+                  id,
+                  name,
+                  court_type,
+                  schema_version,
+                  description,
+                  category,
+                  restart_type,
+                  system,
+                  age_band,
+                  tags_json,
+                  source_template_id
+                ) VALUES (
+                  'existing_project',
+                  'Existing Project',
+                  'half',
+                  3,
+                  'legacy description',
+                  'set piece',
+                  'corner',
+                  '3-1',
+                  'senior',
+                  '[\"legacy\"]',
+                  'corner-a'
+                );",
+            )
+            .expect("partially upgraded schema should be created");
+
+        init_connection(&connection).expect("partially upgraded schema init should succeed");
+
+        let retained = connection
+            .query_row(
+                "SELECT
+                  name,
+                  court_type,
+                  schema_version,
+                  description,
+                  category,
+                  restart_type,
+                  system,
+                  age_band,
+                  tags_json,
+                  source_template_id
+                 FROM project
+                 WHERE id = 'existing_project'",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, Option<String>>(9)?,
+                    ))
+                },
+            )
+            .expect("existing project should survive migration");
+
+        assert_eq!(
+            retained,
+            (
+                "Existing Project".to_string(),
+                "half".to_string(),
+                3,
+                "legacy description".to_string(),
+                "set piece".to_string(),
+                "corner".to_string(),
+                Some("3-1".to_string()),
+                Some("senior".to_string()),
+                "[\"legacy\"]".to_string(),
+                Some("corner-a".to_string()),
+            )
+        );
+
+        connection
+            .execute(
+                "INSERT INTO project (id, name, court_type) VALUES (?1, ?2, ?3)",
+                params!["focus_ready_project", "Focus Ready", "half-defending"],
+            )
+            .expect("partially upgraded schema should accept half-defending");
+    }
 }

@@ -1,3 +1,4 @@
+import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "./browserStorage";
 import { drawTacticalFrame } from "./canvasRenderer";
 import { sampleTimelineAt } from "./timeline";
 import type { TacticalProject } from "../types/domain";
@@ -9,10 +10,7 @@ function projectThumbnailStorageKey(projectId: string): string {
 }
 
 export function readProjectThumbnail(projectId: string): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  return window.localStorage.getItem(projectThumbnailStorageKey(projectId));
+  return readBrowserStorage(projectThumbnailStorageKey(projectId));
 }
 
 export function cacheProjectThumbnail(project: TacticalProject, width = 560, height = 315): string | null {
@@ -37,13 +35,10 @@ export function cacheProjectThumbnail(project: TacticalProject, width = 560, hei
   });
 
   const dataUrl = canvas.toDataURL("image/png");
-  window.localStorage.setItem(projectThumbnailStorageKey(project.meta.id), dataUrl);
+  writeBrowserStorage(projectThumbnailStorageKey(project.meta.id), dataUrl);
   return dataUrl;
 }
 
 export function removeProjectThumbnail(projectId: string): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.removeItem(projectThumbnailStorageKey(projectId));
+  removeBrowserStorage(projectThumbnailStorageKey(projectId));
 }

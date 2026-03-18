@@ -19,7 +19,9 @@ import {
   saveAutosaveSnapshot,
   shouldRestoreAutosave
 } from "./lib/projectAutosave";
+import { readBrowserStorage, writeBrowserStorage } from "./lib/browserStorage";
 import { defaultProject } from "./lib/defaultProject";
+import { queueExportWithLatestProject } from "./lib/exportFlow";
 import { cacheProjectThumbnail, readProjectThumbnail, removeProjectThumbnail } from "./lib/projectThumbnail";
 import { downloadProjectPackage, parseProjectPackage } from "./lib/projectPackage";
 import { cloneDrawableState, createId, CURRENT_SCHEMA_VERSION, migrateProjectToCurrent } from "./lib/projectSchema";
@@ -95,6 +97,10 @@ function formatExportStatus(job: ExportJob): string {
 
 function serializeProject(project: TacticalProject): string {
   return JSON.stringify(project);
+}
+
+function sceneNoteStorageKey(projectId: string, sceneId: string | null | undefined): string {
+  return `scene.note.${projectId}.${sceneId ?? "none"}`;
 }
 
 function cloneProjectAsNewCopy(project: TacticalProject, nextName: string): TacticalProject {
@@ -319,16 +325,37 @@ export function App() {
     }));
   };
 
-  const saveProjectToLocal = async () => {
+  const persistProject = async (
+    nextProject: TacticalProject,
+    nextSnapshot: string,
+    options: {
+      resetEditorHistory?: boolean;
+      onUnavailable?: () => void;
+    } = {}
+  ) => {
     try {
-      updateThumbnailCache(project);
-      const result = await invoke<string>("save_project", { project });
-      clearAutosaveSnapshot(project.meta.id);
-      setPersistedProjectSnapshot(projectSnapshot);
+      updateThumbnailCache(nextProject);
+      const result = await invoke<string>("save_project", { project: nextProject });
+      clearAutosaveSnapshot(nextProject.meta.id);
+      setPersistedProjectSnapshot(nextSnapshot);
       setPersistStatus(result);
-      resetHistory();
+      if (options.resetEditorHistory) {
+        resetHistory();
+      }
       await refreshProjects();
+      return true;
     } catch {
+      options.onUnavailable?.();
+      return false;
+    }
+  };
+
+  const saveProjectToLocal = async () => {
+    const saved = await persistProject(project, projectSnapshot, {
+      resetEditorHistory: true,
+      onUnavailable: () => setPersistStatus("save unavailable in web mode")
+    });
+    if (!saved) {
       setPersistStatus("save unavailable in web mode");
     }
   };
@@ -402,14 +429,23 @@ export function App() {
       outputFileName: `${project.meta.id}-preview.mp4`
     };
 
-    try {
-      const queuedJob = await invoke<ExportJob>("enqueue_mp4_export", { request });
-      setExportStatus(`queued ${queuedJob.exportType.toUpperCase()} ${queuedJob.id}`);
-      return queuedJob;
-    } catch {
-      setExportStatus("export unavailable in web mode");
-      return null;
-    }
+    return queueExportWithLatestProject({
+      hasUnsavedChanges,
+      persistLatestProject: () =>
+        persistProject(project, projectSnapshot, {
+          onUnavailable: () => setExportStatus("export unavailable until save succeeds")
+        }),
+      enqueue: async () => {
+        try {
+          const queuedJob = await invoke<ExportJob>("enqueue_mp4_export", { request });
+          setExportStatus(`queued ${queuedJob.exportType.toUpperCase()} ${queuedJob.id}`);
+          return queuedJob;
+        } catch {
+          setExportStatus("export unavailable in web mode");
+          return null;
+        }
+      }
+    });
   };
 
   const queueStaticExport = async (format: Exclude<ExportType, "mp4">) => {
@@ -423,15 +459,24 @@ export function App() {
       outputFileName: `${project.meta.id}-${timestampMs}ms.${format}`
     };
 
-    try {
-      const command = format === "png" ? "enqueue_png_export" : "enqueue_pdf_export";
-      const queuedJob = await invoke<ExportJob>(command, { request });
-      setExportStatus(`queued ${queuedJob.exportType.toUpperCase()} ${queuedJob.id}`);
-      return queuedJob;
-    } catch {
-      setExportStatus("export unavailable in web mode");
-      return null;
-    }
+    return queueExportWithLatestProject({
+      hasUnsavedChanges,
+      persistLatestProject: () =>
+        persistProject(project, projectSnapshot, {
+          onUnavailable: () => setExportStatus("export unavailable until save succeeds")
+        }),
+      enqueue: async () => {
+        try {
+          const command = format === "png" ? "enqueue_png_export" : "enqueue_pdf_export";
+          const queuedJob = await invoke<ExportJob>(command, { request });
+          setExportStatus(`queued ${queuedJob.exportType.toUpperCase()} ${queuedJob.id}`);
+          return queuedJob;
+        } catch {
+          setExportStatus("export unavailable in web mode");
+          return null;
+        }
+      }
+    });
   };
 
   const queueSelectedExport = async () => {
@@ -459,8 +504,7 @@ export function App() {
 
   const persistSceneNote = (value: string) => {
     setSceneNote(value);
-    const noteKey = `scene.note.${project.meta.id}.${sampledState.activeSceneId ?? "none"}`;
-    window.localStorage.setItem(noteKey, value);
+    writeBrowserStorage(sceneNoteStorageKey(project.meta.id, sampledState.activeSceneId), value);
   };
 
   const cancelExportJob = async (jobId: string) => {
@@ -856,9 +900,12 @@ export function App() {
   }, [advancePlaybackMs, isPlaying, playbackRate, totalDurationMs]);
 
   useEffect(() => {
-    const noteKey = `scene.note.${project.meta.id}.${sampledState.activeSceneId ?? "none"}`;
-    setSceneNote(window.localStorage.getItem(noteKey) ?? "");
+    setSceneNote(readBrowserStorage(sceneNoteStorageKey(project.meta.id, sampledState.activeSceneId)) ?? "");
   }, [project.meta.id, sampledState.activeSceneId]);
+
+  useEffect(() => {
+    updateThumbnailCache(project);
+  }, [projectSnapshot]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -872,7 +919,7 @@ export function App() {
           }
 
           if (row.id === project.meta.id) {
-            return [row.id, cacheProjectThumbnail(project)] as const;
+            return [row.id, readProjectThumbnail(row.id)] as const;
           }
 
           try {
@@ -902,11 +949,7 @@ export function App() {
     return () => {
       isCancelled = true;
     };
-  }, [project, projectRowsForUi]);
-
-  useEffect(() => {
-    updateThumbnailCache(project);
-  }, [project.meta.id]);
+  }, [project.meta.id, projectRowsForUi]);
 
   useEffect(() => {
     if (activeTool !== "select") {

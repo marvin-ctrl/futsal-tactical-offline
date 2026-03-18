@@ -3,7 +3,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS project (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  court_type TEXT NOT NULL DEFAULT 'full' CHECK (court_type IN ('full', 'half')),
+  court_type TEXT NOT NULL DEFAULT 'full' CHECK (court_type IN ('full', 'half', 'half-attacking', 'half-defending')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

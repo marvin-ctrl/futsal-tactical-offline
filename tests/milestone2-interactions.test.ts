@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyCommandToDrawableState } from "../src/lib/editorCommands";
 import { createAutosaveSnapshot, shouldRestoreAutosave } from "../src/lib/projectAutosave";
+import { queueExportWithLatestProject } from "../src/lib/exportFlow";
 import {
   buildCommittedDrawable,
   collectDrawablesInRect,
@@ -255,6 +256,63 @@ test("parseProjectPackage accepts the packaged project envelope", () => {
 test("shouldRestoreAutosave returns true when there is no saved project", () => {
   const snapshot = createAutosaveSnapshot(cloneProject(defaultProject));
   assert.equal(shouldRestoreAutosave(null, snapshot), true);
+});
+
+test("queueExportWithLatestProject persists unsaved edits before enqueueing export", async () => {
+  const callOrder: string[] = [];
+
+  const job = await queueExportWithLatestProject({
+    hasUnsavedChanges: true,
+    persistLatestProject: async () => {
+      callOrder.push("persist");
+      return true;
+    },
+    enqueue: async () => {
+      callOrder.push("enqueue");
+      return { id: "job_1" };
+    }
+  });
+
+  assert.deepEqual(callOrder, ["persist", "enqueue"]);
+  assert.deepEqual(job, { id: "job_1" });
+});
+
+test("queueExportWithLatestProject skips enqueue when persisting unsaved edits fails", async () => {
+  const callOrder: string[] = [];
+
+  const job = await queueExportWithLatestProject({
+    hasUnsavedChanges: true,
+    persistLatestProject: async () => {
+      callOrder.push("persist");
+      return false;
+    },
+    enqueue: async () => {
+      callOrder.push("enqueue");
+      return { id: "job_2" };
+    }
+  });
+
+  assert.deepEqual(callOrder, ["persist"]);
+  assert.equal(job, null);
+});
+
+test("queueExportWithLatestProject does not persist when editor state is already saved", async () => {
+  const callOrder: string[] = [];
+
+  const job = await queueExportWithLatestProject({
+    hasUnsavedChanges: false,
+    persistLatestProject: async () => {
+      callOrder.push("persist");
+      return true;
+    },
+    enqueue: async () => {
+      callOrder.push("enqueue");
+      return { id: "job_3" };
+    }
+  });
+
+  assert.deepEqual(callOrder, ["enqueue"]);
+  assert.deepEqual(job, { id: "job_3" });
 });
 
 test("shouldRestoreAutosave prefers the newer autosaved project", () => {

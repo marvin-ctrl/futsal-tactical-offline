@@ -1,4 +1,5 @@
 import type { TacticalProject } from "../types/domain";
+import { readBrowserStorage, removeBrowserStorage, writeBrowserStorage } from "./browserStorage";
 import { normalizeProject } from "./projectSchema";
 
 const AUTOSAVE_LATEST_KEY = "project.autosave.latest";
@@ -13,39 +14,15 @@ function autosaveProjectKey(projectId: string): string {
 }
 
 function readStorageValue(key: string): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+  return readBrowserStorage(key);
 }
 
 function writeStorageValue(key: string, value: string): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Ignore autosave write failures so editing can continue.
-  }
+  writeBrowserStorage(key, value);
 }
 
 function removeStorageValue(key: string): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    // Ignore autosave clear failures.
-  }
+  removeBrowserStorage(key);
 }
 
 function parseAutosaveSnapshot(raw: string | null): ProjectAutosaveSnapshot | null {
