@@ -123,6 +123,18 @@ Rust renderer tests:
 cargo test --manifest-path src-tauri/Cargo.toml renderer
 ```
 
+Release verification baseline:
+
+```bash
+npm run release:verify
+```
+
+## Automation
+
+- CI workflow: `/Users/marvineakins/Downloads/Projects/Futsal Tactical/.github/workflows/ci.yml`
+- Release workflow: `/Users/marvineakins/Downloads/Projects/Futsal Tactical/.github/workflows/release.yml`
+- Release runbook: `/Users/marvineakins/Downloads/Projects/Futsal Tactical/docs/release-process.md`
+
 ## Release artifacts
 
 The macOS build outputs are generated under:

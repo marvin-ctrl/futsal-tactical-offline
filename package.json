@@ -9,6 +9,7 @@
     "test:interactions": "node --import tsx --test --test-concurrency=1 tests/milestone2-interactions.test.ts",
     "preview": "vite preview",
     "parity:check": "tsx scripts/check-preview-export-parity.ts",
+    "release:verify": "npm run build && npm run test:interactions && npm run parity:check && cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install FFmpeg
+        run: brew install ffmpeg
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify release baseline
+        run: npm run release:verify
+
+      - name: Upload parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-artifacts
+          path: /Users/runner/work/futsal-tactical-offline/futsal-tactical-offline/tests/parity/artifacts
+          if-no-files-found: ignore
