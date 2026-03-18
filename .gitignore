@@ -16,3 +16,7 @@ src-tauri/.cargo
 *.sqlite-wal
 
 tests/parity/artifacts
+coverage
+playwright-report
+test-results
+*.futsal-play.json
