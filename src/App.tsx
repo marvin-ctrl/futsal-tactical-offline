@@ -44,6 +44,8 @@ import type {
 } from "./types/domain";
 import type { AppView } from "./types/ui";
 
+const IS_DEV = import.meta.env.DEV;
+
 const PROJECT_FALLBACK_ROW = (project: TacticalProject): ProjectRow => ({
   id: project.meta.id,
   name: project.meta.name,
@@ -171,6 +173,7 @@ export function App() {
     setRightRailWidth,
     setBottomDockHeight
   } = useUiState();
+  const activeShellVersion = IS_DEV ? shellVersion : "v2";
 
   const [health, setHealth] = useState("not checked");
   const [dbStatus, setDbStatus] = useState("not initialized");
@@ -1082,7 +1085,7 @@ export function App() {
         return;
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key === ".") {
+      if (IS_DEV && (event.metaKey || event.ctrlKey) && event.key === ".") {
         event.preventDefault();
         toggleDevDrawer();
         return;
@@ -1137,7 +1140,7 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [appView, applyCommand, clearSelection, projectDialogMode, redo, selection.ids, selectedDrawables, setSelection, toggleDevDrawer, undo]);
 
-  if (shellVersion === "legacy") {
+  if (activeShellVersion === "legacy") {
     return (
       <LegacyShell
         project={project}
@@ -1315,7 +1318,7 @@ export function App() {
         />
       }
       devDrawer={
-        devDrawer.open ? (
+        IS_DEV && devDrawer.open ? (
           <DevDrawer
             isOpen={devDrawer.open}
             health={health}
@@ -1324,7 +1327,7 @@ export function App() {
             loadStatus={loadStatus}
             exportStatus={exportStatus}
             exportJobs={exportJobs}
-            shellVersion={shellVersion}
+            shellVersion={activeShellVersion}
             onCheckHealth={checkHealth}
             onInitDatabase={initDatabase}
             onSetShellVersion={setShellVersion}
@@ -1391,6 +1394,7 @@ export function App() {
           persistStatus={persistStatus}
           loadStatus={loadStatus}
           thumbnailById={thumbnailById}
+          showDiagnostics={IS_DEV}
           onClose={closeProjectDialog}
           onNewProject={createProjectFromDialog}
           onLoadProject={loadProjectFromDialog}
@@ -1399,6 +1403,9 @@ export function App() {
             setAppView("dashboard");
           }}
           onOpenDiagnostics={() => {
+            if (!IS_DEV) {
+              return;
+            }
             closeProjectDialog();
             if (!devDrawer.open) {
               toggleDevDrawer();

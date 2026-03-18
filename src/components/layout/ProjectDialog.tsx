@@ -12,6 +12,7 @@ interface ProjectDialogProps {
   thumbnailById: Record<string, string | null>;
   persistStatus: string;
   loadStatus: string;
+  showDiagnostics: boolean;
   onClose: () => void;
   onNewProject: () => void;
   onLoadProject: (projectId: string) => void;
@@ -38,6 +39,7 @@ export function ProjectDialog({
   thumbnailById,
   persistStatus,
   loadStatus,
+  showDiagnostics,
   onClose,
   onNewProject,
   onLoadProject,
@@ -158,9 +160,11 @@ export function ProjectDialog({
                 <button type="button" className="button button--ghost" onClick={onStartSaveAs}>
                   Save As
                 </button>
-                <button type="button" className="button button--ghost" onClick={onOpenDiagnostics}>
-                  Diagnostics
-                </button>
+                {showDiagnostics ? (
+                  <button type="button" className="button button--ghost" onClick={onOpenDiagnostics}>
+                    Diagnostics
+                  </button>
+                ) : null}
               </div>
               <input
                 ref={importInputRef}

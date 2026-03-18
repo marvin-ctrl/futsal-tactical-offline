@@ -25,7 +25,7 @@ interface UiState {
 }
 
 const initialShellVersion =
-  typeof window !== "undefined"
+  typeof window !== "undefined" && import.meta.env.DEV
     ? ((readBrowserStorage("ui.shellVersion") as "legacy" | "v2" | null) ?? "v2")
     : "v2";
 
