@@ -618,6 +618,17 @@ button:disabled {
   gap: var(--space-3);
 }
 
+.formation-preset-stack,
+.formation-preset-group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.formation-preset-group > span {
+  color: var(--text-dim);
+  font-size: 0.84rem;
+}
+
 .scene-duration-row {
   display: grid;
   gap: var(--space-2);

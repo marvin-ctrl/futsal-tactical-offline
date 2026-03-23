@@ -1,17 +1,19 @@
 use crate::models::{KeyframePayload, ScenePayload, TacticalProjectPayload};
-use font8x8::{BASIC_FONTS, UnicodeFonts};
+use ab_glyph::{FontArc, PxScale};
 use image::imageops::{crop_imm, overlay, resize, FilterType};
 use image::{ImageError, Rgba, RgbaImage};
 use imageproc::drawing::{
     draw_filled_circle_mut, draw_filled_rect_mut, draw_hollow_circle_mut, draw_hollow_rect_mut,
-    draw_line_segment_mut,
+    draw_line_segment_mut, draw_polygon_mut, draw_text_mut, text_size,
 };
+use imageproc::point::Point;
 use imageproc::rect::Rect;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::f32::consts::PI;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -40,6 +42,7 @@ enum CourtType {
 
 const LOGICAL_RENDER_WIDTH: u32 = 1000;
 const LOGICAL_RENDER_HEIGHT: u32 = 500;
+const EXPORT_FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/SourceSans3-Semibold.ttf");
 
 #[derive(Debug, Clone, Copy)]
 struct RenderViewport {
@@ -357,7 +360,7 @@ fn fallback_fill_color(drawable_type: &str) -> [u8; 3] {
         "player" => [45, 106, 79],
         "goalkeeper" => [239, 71, 111],
         "ball" => [248, 250, 252],
-        "cone" => [255, 159, 28],
+        "cone" => [255, 154, 31],
         "zone" => [245, 158, 11],
         "arrow" | "line" => [56, 189, 248],
         "label" => [15, 118, 110],
@@ -369,6 +372,7 @@ fn fallback_stroke_color(drawable_type: &str) -> [u8; 3] {
     match drawable_type {
         "zone" => [180, 83, 9],
         "arrow" | "line" => [12, 74, 110],
+        "cone" => [122, 63, 9],
         _ => [17, 24, 39],
     }
 }
@@ -384,8 +388,8 @@ fn default_stroke_width(drawable_type: &str) -> f32 {
 fn default_dimensions(drawable_type: &str) -> (f32, f32) {
     match drawable_type {
         "player" | "goalkeeper" => (24.0, 24.0),
-        "ball" => (10.0, 10.0),
-        "cone" => (10.0, 10.0),
+        "ball" => (12.0, 12.0),
+        "cone" => (14.0, 14.0),
         "zone" => (120.0, 70.0),
         "arrow" | "line" => (80.0, 0.0),
         "label" => (0.0, 0.0),
@@ -454,21 +458,39 @@ fn interpolate_style(a: &RenderStyle, b: &RenderStyle, t: f32) -> RenderStyle {
 }
 
 fn render_frame(width: u32, height: u32, court_type: CourtType, drawables: &[RenderDrawable]) -> RgbaImage {
-    let mut image = RgbaImage::new(LOGICAL_RENDER_WIDTH, LOGICAL_RENDER_HEIGHT);
+    let render_scale = resolve_render_scale(court_type, width, height);
+    let scaled_world_width = ((LOGICAL_RENDER_WIDTH as f32) * render_scale)
+        .round()
+        .max(1.0) as u32;
+    let scaled_world_height = ((LOGICAL_RENDER_HEIGHT as f32) * render_scale)
+        .round()
+        .max(1.0) as u32;
+    let mut image = RgbaImage::new(scaled_world_width, scaled_world_height);
     draw_pitch_background(&mut image);
     draw_full_court(&mut image);
+    let scaled_drawables = scale_drawables(drawables, render_scale);
 
-    for drawable in drawables {
+    for drawable in &scaled_drawables {
         draw_drawable(&mut image, drawable);
     }
 
     match court_type {
-        CourtType::Full => resize(&image, width, height, FilterType::Triangle),
+        CourtType::Full => {
+            if image.width() == width && image.height() == height {
+                image
+            } else {
+                resize(&image, width, height, FilterType::Lanczos3)
+            }
+        }
         CourtType::HalfAttacking | CourtType::HalfDefending => {
-            let viewport = resolve_world_viewport(court_type);
+            let viewport = resolve_scaled_world_viewport(court_type, render_scale);
             let focused_image = crop_imm(&image, viewport.x, viewport.y, viewport.width, viewport.height).to_image();
             let square_size = width.min(height).max(1);
-            let scaled = resize(&focused_image, square_size, square_size, FilterType::Triangle);
+            let scaled = if focused_image.width() == square_size && focused_image.height() == square_size {
+                focused_image
+            } else {
+                resize(&focused_image, square_size, square_size, FilterType::Lanczos3)
+            };
             let mut framed = RgbaImage::from_pixel(width, height, RUNOFF_COLOR);
             let offset_x = ((width - square_size) / 2) as i64;
             let offset_y = ((height - square_size) / 2) as i64;
@@ -476,6 +498,55 @@ fn render_frame(width: u32, height: u32, court_type: CourtType, drawables: &[Ren
             framed
         }
     }
+}
+
+fn resolve_render_scale(court_type: CourtType, width: u32, height: u32) -> f32 {
+    match court_type {
+        CourtType::Full => {
+            let scale_x = width as f32 / LOGICAL_RENDER_WIDTH as f32;
+            let scale_y = height as f32 / LOGICAL_RENDER_HEIGHT as f32;
+            scale_x.max(scale_y).max(1.0)
+        }
+        CourtType::HalfAttacking | CourtType::HalfDefending => {
+            let square_size = width.min(height).max(1) as f32;
+            (square_size / (LOGICAL_RENDER_WIDTH as f32 * 0.5)).max(1.0)
+        }
+    }
+}
+
+fn resolve_scaled_world_viewport(court_type: CourtType, scale: f32) -> RenderViewport {
+    let viewport = resolve_world_viewport(court_type);
+    RenderViewport {
+        x: ((viewport.x as f32) * scale).round() as u32,
+        y: ((viewport.y as f32) * scale).round() as u32,
+        width: ((viewport.width as f32) * scale).round().max(1.0) as u32,
+        height: ((viewport.height as f32) * scale).round().max(1.0) as u32,
+    }
+}
+
+fn scale_drawables(drawables: &[RenderDrawable], scale: f32) -> Vec<RenderDrawable> {
+    drawables
+        .iter()
+        .map(|drawable| RenderDrawable {
+            drawable_type: drawable.drawable_type.clone(),
+            x: drawable.x * scale,
+            y: drawable.y * scale,
+            x2: drawable.x2.map(|value| value * scale),
+            y2: drawable.y2.map(|value| value * scale),
+            rotation: drawable.rotation,
+            width: drawable.width * scale,
+            height: drawable.height * scale,
+            label: drawable.label.clone(),
+            style: RenderStyle {
+                stroke: drawable.style.stroke,
+                fill: drawable.style.fill,
+                stroke_width: ((drawable.style.stroke_width as f32) * scale)
+                    .round()
+                    .max(1.0) as i32,
+                dashed: drawable.style.dashed,
+            },
+        })
+        .collect()
 }
 
 fn resolve_world_viewport(court_type: CourtType) -> RenderViewport {
@@ -514,6 +585,9 @@ fn draw_pitch_background(canvas: &mut RgbaImage) {
 }
 
 fn draw_full_court(canvas: &mut RgbaImage) {
+    let line_thickness = scaled_thickness(canvas, 2);
+    let spot_radius = scaled_radius(canvas, 4);
+    let center_dot_radius = scaled_radius(canvas, 3);
     let width = canvas.width() as f32;
     let height = canvas.height() as f32;
     let margin = width.min(height) * 0.03;
@@ -545,14 +619,14 @@ fn draw_full_court(canvas: &mut RgbaImage) {
         (center_x, top),
         (center_x, bottom),
         line_color,
-        2,
+        line_thickness,
         false,
     );
 
     draw_filled_circle_mut(
         canvas,
         (center_x.round() as i32, center_y.round() as i32),
-        3,
+        center_dot_radius,
         line_color,
     );
     draw_hollow_circle_mut(
@@ -572,25 +646,25 @@ fn draw_full_court(canvas: &mut RgbaImage) {
     draw_filled_circle_mut(
         canvas,
         (left_mark.0.round() as i32, left_mark.1.round() as i32),
-        4,
+        spot_radius,
         line_color,
     );
     draw_filled_circle_mut(
         canvas,
         (right_mark.0.round() as i32, right_mark.1.round() as i32),
-        4,
+        spot_radius,
         line_color,
     );
     draw_filled_circle_mut(
         canvas,
         (left_second_mark.0.round() as i32, left_second_mark.1.round() as i32),
-        4,
+        spot_radius,
         line_color,
     );
     draw_filled_circle_mut(
         canvas,
         (right_second_mark.0.round() as i32, right_second_mark.1.round() as i32),
-        4,
+        spot_radius,
         line_color,
     );
 
@@ -601,7 +675,7 @@ fn draw_full_court(canvas: &mut RgbaImage) {
         left,
         center_y + goal_width * 0.5,
         line_color,
-        2,
+        line_thickness,
     );
     draw_outline_rect_thick(
         canvas,
@@ -610,13 +684,13 @@ fn draw_full_court(canvas: &mut RgbaImage) {
         right + goal_depth,
         center_y + goal_width * 0.5,
         line_color,
-        2,
+        line_thickness,
     );
 
-    draw_arc(canvas, (left, top), corner_radius, 0.0, 90.0, line_color, 2);
-    draw_arc(canvas, (left, bottom), corner_radius, -90.0, 0.0, line_color, 2);
-    draw_arc(canvas, (right, top), corner_radius, 90.0, 180.0, line_color, 2);
-    draw_arc(canvas, (right, bottom), corner_radius, 180.0, 270.0, line_color, 2);
+    draw_arc(canvas, (left, top), corner_radius, 0.0, 90.0, line_color, line_thickness);
+    draw_arc(canvas, (left, bottom), corner_radius, -90.0, 0.0, line_color, line_thickness);
+    draw_arc(canvas, (right, top), corner_radius, 90.0, 180.0, line_color, line_thickness);
+    draw_arc(canvas, (right, bottom), corner_radius, 180.0, 270.0, line_color, line_thickness);
 
     draw_substitution_marks(canvas, left, right, bottom, unit, line_color);
     draw_goal_line_distance_marks(canvas, left, right, top, bottom, unit, line_color, true, true);
@@ -632,6 +706,7 @@ fn draw_futsal_penalty_area(
     unit: f32,
     line_color: Rgba<u8>,
 ) {
+    let line_thickness = scaled_thickness(canvas, 2);
     let center_y = (top + bottom) * 0.5;
     let goal_width = 3.0 * unit;
     let penalty_radius = 6.0 * unit;
@@ -654,7 +729,7 @@ fn draw_futsal_penalty_area(
             -90.0,
             top_join_angle,
             line_color,
-            2,
+            line_thickness,
         );
         draw_arc(
             canvas,
@@ -663,14 +738,14 @@ fn draw_futsal_penalty_area(
             bottom_join_angle,
             90.0,
             line_color,
-            2,
+            line_thickness,
         );
         draw_styled_line(
             canvas,
             (join_x, penalty_join_top),
             (join_x, penalty_join_bottom),
             line_color,
-            2,
+            line_thickness,
             false,
         );
         return;
@@ -686,7 +761,7 @@ fn draw_futsal_penalty_area(
         -90.0,
         top_join_angle,
         line_color,
-        2,
+        line_thickness,
     );
     draw_arc(
         canvas,
@@ -695,14 +770,14 @@ fn draw_futsal_penalty_area(
         90.0,
         bottom_join_angle,
         line_color,
-        2,
+        line_thickness,
     );
     draw_styled_line(
         canvas,
         (join_x, penalty_join_top),
         (join_x, penalty_join_bottom),
         line_color,
-        2,
+        line_thickness,
         false,
     );
 }
@@ -715,6 +790,7 @@ fn draw_substitution_marks(
     unit: f32,
     line_color: Rgba<u8>,
 ) {
+    let line_thickness = scaled_thickness(canvas, 2);
     let center_x = (left + right) * 0.5;
     let mark_len = (0.8 * unit).max(8.0);
     let marks = [
@@ -729,7 +805,7 @@ fn draw_substitution_marks(
             (mark_x, bottom - mark_len * 0.5),
             (mark_x, bottom + mark_len * 0.5),
             line_color,
-            2,
+            line_thickness,
             false,
         );
     }
@@ -746,6 +822,7 @@ fn draw_goal_line_distance_marks(
     draw_left: bool,
     draw_right: bool,
 ) {
+    let line_thickness = scaled_thickness(canvas, 2);
     let offset = 5.0 * unit;
     let mark_len = (0.6 * unit).max(8.0);
     let marks_y = [top + offset, bottom - offset];
@@ -756,7 +833,7 @@ fn draw_goal_line_distance_marks(
                 (left - mark_len * 0.5, mark_y),
                 (left + mark_len * 0.5, mark_y),
                 line_color,
-                2,
+                line_thickness,
                 false,
             );
         }
@@ -766,7 +843,7 @@ fn draw_goal_line_distance_marks(
                 (right - mark_len * 0.5, mark_y),
                 (right + mark_len * 0.5, mark_y),
                 line_color,
-                2,
+                line_thickness,
                 false,
             );
         }
@@ -832,13 +909,15 @@ fn draw_zone(canvas: &mut RgbaImage, drawable: &RenderDrawable) {
         );
 
         if let Some(label) = drawable.label.as_deref() {
+            let label_padding = scaled_padding(canvas, 4);
+            let text_scale = scaled_font_size(canvas, 12.0);
             draw_text_bitmap(
                 canvas,
                 label,
-                rect.left() + 4,
-                rect.top() + 4,
+                rect.left() + label_padding,
+                rect.top() + label_padding,
                 contrasting_text_color(drawable.style.fill),
-                2,
+                text_scale,
             );
         }
     }
@@ -851,12 +930,23 @@ fn draw_connection(canvas: &mut RgbaImage, drawable: &RenderDrawable, with_arrow
     } else {
         (drawable.x + drawable.width, drawable.y + drawable.height)
     };
+    let is_dribble = is_dribble_style(drawable);
 
-    if is_dribble_style(drawable) {
-        draw_wavy_line(
+    if is_dribble {
+        let accent = with_alpha(
+            lerp_color(drawable.style.stroke, Rgba([38, 23, 8, 255]), 0.72),
+            drawable.style.stroke[3].saturating_mul(3) / 4,
+        );
+        let points = build_dribble_wave_points(start, end, drawable.style.stroke_width.max(3));
+        draw_polyline(
             canvas,
-            start,
-            end,
+            &points,
+            accent,
+            drawable.style.stroke_width.max(3) + 2,
+        );
+        draw_polyline(
+            canvas,
+            &points,
             drawable.style.stroke,
             drawable.style.stroke_width.max(3),
         );
@@ -872,13 +962,32 @@ fn draw_connection(canvas: &mut RgbaImage, drawable: &RenderDrawable, with_arrow
     }
 
     if with_arrow_head {
+        if is_dribble {
+            draw_arrow_head(
+                canvas,
+                start,
+                end,
+                with_alpha(
+                    lerp_color(drawable.style.stroke, Rgba([38, 23, 8, 255]), 0.72),
+                    drawable.style.stroke[3].saturating_mul(3) / 4,
+                ),
+                drawable.style.stroke_width + 2,
+            );
+        }
         draw_arrow_head(canvas, start, end, drawable.style.stroke, drawable.style.stroke_width);
     }
 
     if let Some(label) = drawable.label.as_deref() {
         let text_x = ((start.0 + end.0) * 0.5).round() as i32;
-        let text_y = ((start.1 + end.1) * 0.5).round() as i32;
-        draw_text_bitmap(canvas, label, text_x, text_y, drawable.style.stroke, 2);
+        let text_y = ((start.1 + end.1) * 0.5 - scaled_length(canvas, 4.0)).round() as i32;
+        draw_text_bitmap(
+            canvas,
+            label,
+            text_x,
+            text_y,
+            drawable.style.stroke,
+            scaled_font_size(canvas, 11.0),
+        );
     }
 }
 
@@ -909,7 +1018,7 @@ fn draw_player(canvas: &mut RgbaImage, drawable: &RenderDrawable, is_goalkeeper:
         (center.0 as f32, center.1 as f32),
         marker_end,
         drawable.style.stroke,
-        1,
+        scaled_thickness(canvas, 1),
         false,
     );
 
@@ -919,7 +1028,7 @@ fn draw_player(canvas: &mut RgbaImage, drawable: &RenderDrawable, is_goalkeeper:
             label,
             center,
             contrasting_text_color(fill),
-            2,
+            scaled_font_size(canvas, 12.0),
         );
     }
 }
@@ -927,42 +1036,54 @@ fn draw_player(canvas: &mut RgbaImage, drawable: &RenderDrawable, is_goalkeeper:
 fn draw_ball(canvas: &mut RgbaImage, drawable: &RenderDrawable) {
     let center = (drawable.x.round() as i32, drawable.y.round() as i32);
     let radius = resolve_ball_radius(drawable);
-    let fill = Rgba([248, 250, 252, drawable.style.fill.0[3]]);
-    let seam = Rgba([15, 23, 42, drawable.style.stroke.0[3]]);
+    let fill = Rgba([251, 253, 255, drawable.style.fill[3]]);
+    let seam = Rgba([22, 35, 52, drawable.style.stroke[3]]);
+    let shadow = with_alpha(Rgba([8, 19, 31, 255]), drawable.style.fill[3] / 7);
+    let ring_thickness = drawable.style.stroke_width.max(2);
+    let pentagon = build_regular_polygon_points(
+        drawable.x,
+        drawable.y,
+        (radius as f32 * 0.34).max(1.5),
+        5,
+        -PI * 0.5,
+    );
 
+    draw_filled_circle_mut(
+        canvas,
+        (
+            (drawable.x + radius as f32 * 0.18).round() as i32,
+            (drawable.y + radius as f32 * 0.16).round() as i32,
+        ),
+        radius,
+        shadow,
+    );
     draw_filled_circle_mut(canvas, center, radius, fill);
-    draw_hollow_circle_mut(canvas, center, radius, seam);
-    draw_arc(
-        canvas,
-        (drawable.x - radius as f32 * 0.12, drawable.y),
-        (radius as f32 * 0.5).round() as i32,
-        80.0,
-        280.0,
-        seam,
-        1,
-    );
-    draw_arc(
-        canvas,
-        (drawable.x + radius as f32 * 0.12, drawable.y),
-        (radius as f32 * 0.5).round() as i32,
-        -100.0,
-        100.0,
-        seam,
-        1,
-    );
-    draw_styled_line(
+    for offset in 0..ring_thickness {
+        draw_hollow_circle_mut(canvas, center, radius + offset, seam);
+    }
+    draw_polygon_mut(canvas, &pentagon, seam);
+    if radius >= 5 {
+        for point in &pentagon {
+            let angle = (point.y as f32 - drawable.y).atan2(point.x as f32 - drawable.x);
+            let seam_start = (
+                drawable.x + angle.cos() * radius as f32 * 0.46,
+                drawable.y + angle.sin() * radius as f32 * 0.46,
+            );
+            let seam_end = (
+                drawable.x + angle.cos() * radius as f32 * 0.83,
+                drawable.y + angle.sin() * radius as f32 * 0.83,
+            );
+            draw_thick_line(canvas, seam_start, seam_end, seam, ((radius as f32 * 0.16).max(1.5)).round() as i32);
+        }
+    }
+    draw_filled_circle_mut(
         canvas,
         (
-            drawable.x - radius as f32 * 0.18,
-            drawable.y - radius as f32 * 0.48,
+            (drawable.x - radius as f32 * 0.28).round() as i32,
+            (drawable.y - radius as f32 * 0.26).round() as i32,
         ),
-        (
-            drawable.x + radius as f32 * 0.18,
-            drawable.y + radius as f32 * 0.48,
-        ),
-        seam,
-        1,
-        false,
+        ((radius as f32 * 0.16).max(1.0)).round() as i32,
+        with_alpha(Rgba([255, 255, 255, 255]), drawable.style.fill[3].saturating_mul(17) / 20),
     );
 }
 
@@ -979,33 +1100,30 @@ fn resolve_ball_radius(drawable: &RenderDrawable) -> i32 {
     let diameter = drawable
         .width
         .max(drawable.height)
-        .min(10.0)
-        .max(8.0);
+        .min(12.0)
+        .max(10.0);
     (diameter * 0.5).round() as i32
 }
 
 fn draw_cone(canvas: &mut RgbaImage, drawable: &RenderDrawable) {
-    let x = drawable.x.round() as i32;
-    let y = drawable.y.round() as i32;
-    let size = drawable.width.max(drawable.height).max(10.0).round() as i32;
+    let size = drawable.width.max(drawable.height).max(14.0);
+    let height = size * 1.18;
+    let body = build_cone_body_points(drawable.x, drawable.y, size, height);
+    let band = build_cone_band_points(&body, 0.58, 0.8);
+    let highlight = build_cone_highlight_points(drawable.x, drawable.y, size, height);
 
-    if let Some(rect) = rect_from_points(
-        (x - size / 2) as f32,
-        (y - size / 2) as f32,
-        (x + size / 2) as f32,
-        (y + size / 2) as f32,
-    ) {
-        draw_filled_rect_mut(canvas, rect, drawable.style.fill);
-        draw_outline_rect_thick(
-            canvas,
-            rect.left() as f32,
-            rect.top() as f32,
-            (rect.right() + 1) as f32,
-            (rect.bottom() + 1) as f32,
-            drawable.style.stroke,
-            drawable.style.stroke_width,
-        );
-    }
+    draw_polygon_mut(canvas, &body, drawable.style.fill);
+    draw_polygon_mut(
+        canvas,
+        &highlight,
+        lerp_color(drawable.style.fill, Rgba([255, 242, 199, drawable.style.fill[3]]), 0.32),
+    );
+    draw_polygon_mut(
+        canvas,
+        &band,
+        lerp_color(drawable.style.fill, Rgba([154, 77, 16, drawable.style.fill[3]]), 0.45),
+    );
+    draw_polygon_outline(canvas, &body, drawable.style.stroke, drawable.style.stroke_width.max(1));
 }
 
 fn draw_label_tag(canvas: &mut RgbaImage, drawable: &RenderDrawable) {
@@ -1019,9 +1137,9 @@ fn draw_label_tag(canvas: &mut RgbaImage, drawable: &RenderDrawable) {
         return;
     }
 
-    let scale = 2;
+    let scale = scaled_font_size(canvas, 12.0);
     let (text_width, text_height) = measure_text(&text, scale);
-    let padding = 4_i32;
+    let padding = scaled_padding(canvas, 4);
     let left = drawable.x.round() as i32;
     let top = drawable.y.round() as i32;
     let right = left + text_width as i32 + padding * 2;
@@ -1086,6 +1204,8 @@ fn draw_dashed_line(
     color: Rgba<u8>,
     thickness: i32,
 ) {
+    let dash = scaled_length(canvas, 16.0);
+    let gap = scaled_length(canvas, 10.0);
     let dx = end.0 - start.0;
     let dy = end.1 - start.1;
     let distance = (dx * dx + dy * dy).sqrt();
@@ -1093,8 +1213,6 @@ fn draw_dashed_line(
         return;
     }
 
-    let dash = 16.0;
-    let gap = 10.0;
     let mut cursor = 0.0_f32;
 
     while cursor < distance {
@@ -1106,40 +1224,6 @@ fn draw_dashed_line(
         let p1 = (start.0 + dx * t1, start.1 + dy * t1);
         draw_thick_line(canvas, p0, p1, color, thickness);
         cursor += dash + gap;
-    }
-}
-
-fn draw_wavy_line(
-    canvas: &mut RgbaImage,
-    start: (f32, f32),
-    end: (f32, f32),
-    color: Rgba<u8>,
-    thickness: i32,
-) {
-    let dx = end.0 - start.0;
-    let dy = end.1 - start.1;
-    let distance = (dx * dx + dy * dy).sqrt();
-    if distance <= f32::EPSILON {
-        return;
-    }
-
-    let unit_x = dx / distance;
-    let unit_y = dy / distance;
-    let normal_x = -unit_y;
-    let normal_y = unit_x;
-    let amplitude = (thickness as f32 * 1.8).max(5.0);
-    let wavelength = 28.0;
-    let cycles = (distance / wavelength).max(1.5);
-    let steps = ((distance / 8.0).ceil() as i32).max(16);
-    let mut previous = start;
-
-    for step in 1..=steps {
-        let t = step as f32 / steps as f32;
-        let base = (start.0 + unit_x * distance * t, start.1 + unit_y * distance * t);
-        let offset = (t * PI * 2.0 * cycles).sin() * amplitude;
-        let point = (base.0 + normal_x * offset, base.1 + normal_y * offset);
-        draw_thick_line(canvas, previous, point, color, thickness.max(1));
-        previous = point;
     }
 }
 
@@ -1180,6 +1264,54 @@ fn draw_thick_line(
     }
 }
 
+fn draw_polyline(
+    canvas: &mut RgbaImage,
+    points: &[(f32, f32)],
+    color: Rgba<u8>,
+    thickness: i32,
+) {
+    if points.len() < 2 {
+        return;
+    }
+
+    for index in 1..points.len() {
+        draw_thick_line(canvas, points[index - 1], points[index], color, thickness.max(1));
+    }
+}
+
+fn build_dribble_wave_points(
+    start: (f32, f32),
+    end: (f32, f32),
+    thickness: i32,
+) -> Vec<(f32, f32)> {
+    let dx = end.0 - start.0;
+    let dy = end.1 - start.1;
+    let distance = (dx * dx + dy * dy).sqrt();
+    if distance <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let unit_x = dx / distance;
+    let unit_y = dy / distance;
+    let normal_x = -unit_y;
+    let normal_y = unit_x;
+    let distance_scale = (distance / 42.0).clamp(0.7, 1.0);
+    let amplitude = ((thickness as f32 * 1.15).clamp(3.25, 6.25)) * distance_scale;
+    let cycles = (distance / 48.0).clamp(1.15, 4.25);
+    let steps = ((distance / 6.0).ceil() as i32).max(18);
+    let mut points = Vec::with_capacity((steps + 1) as usize);
+
+    for step in 0..=steps {
+        let t = step as f32 / steps as f32;
+        let base = (start.0 + unit_x * distance * t, start.1 + unit_y * distance * t);
+        let envelope = (PI * t).sin().powf(0.85);
+        let offset = (t * PI * 2.0 * cycles).sin() * amplitude * envelope;
+        points.push((base.0 + normal_x * offset, base.1 + normal_y * offset));
+    }
+
+    points
+}
+
 fn draw_arrow_head(
     canvas: &mut RgbaImage,
     start: (f32, f32),
@@ -1195,7 +1327,7 @@ fn draw_arrow_head(
     }
 
     let angle = dy.atan2(dx);
-    let head_length = 12.0 + (thickness as f32 * 1.4);
+    let head_length = scaled_length(canvas, 12.0) + (thickness as f32 * 1.4);
     let spread = 28.0_f32.to_radians();
 
     let left = (
@@ -1218,6 +1350,110 @@ fn is_dribble_style(drawable: &RenderDrawable) -> bool {
         && drawable.style.stroke.0[2] == 94
 }
 
+fn build_regular_polygon_points(
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    sides: usize,
+    start_angle: f32,
+) -> Vec<Point<i32>> {
+    (0..sides)
+        .map(|index| {
+            let angle = start_angle + (PI * 2.0 * index as f32) / sides as f32;
+            Point::new(
+                (center_x + angle.cos() * radius).round() as i32,
+                (center_y + angle.sin() * radius).round() as i32,
+            )
+        })
+        .collect()
+}
+
+fn build_cone_body_points(center_x: f32, center_y: f32, size: f32, height: f32) -> Vec<Point<i32>> {
+    vec![
+        Point::new(
+            (center_x - size * 0.18).round() as i32,
+            (center_y - height * 0.46).round() as i32,
+        ),
+        Point::new(
+            (center_x + size * 0.18).round() as i32,
+            (center_y - height * 0.46).round() as i32,
+        ),
+        Point::new(
+            (center_x + size * 0.46).round() as i32,
+            (center_y + height * 0.42).round() as i32,
+        ),
+        Point::new(
+            (center_x - size * 0.46).round() as i32,
+            (center_y + height * 0.42).round() as i32,
+        ),
+    ]
+}
+
+fn build_cone_band_points(body: &[Point<i32>], start_t: f32, end_t: f32) -> Vec<Point<i32>> {
+    vec![
+        lerp_i32_point(body[0], body[3], start_t),
+        lerp_i32_point(body[1], body[2], start_t),
+        lerp_i32_point(body[1], body[2], end_t),
+        lerp_i32_point(body[0], body[3], end_t),
+    ]
+}
+
+fn build_cone_highlight_points(
+    center_x: f32,
+    center_y: f32,
+    size: f32,
+    height: f32,
+) -> Vec<Point<i32>> {
+    vec![
+        Point::new(
+            (center_x - size * 0.12).round() as i32,
+            (center_y - height * 0.22).round() as i32,
+        ),
+        Point::new(
+            (center_x - size * 0.01).round() as i32,
+            (center_y - height * 0.10).round() as i32,
+        ),
+        Point::new(
+            (center_x + size * 0.08).round() as i32,
+            (center_y + height * 0.12).round() as i32,
+        ),
+        Point::new(
+            (center_x - size * 0.02).round() as i32,
+            (center_y + height * 0.26).round() as i32,
+        ),
+    ]
+}
+
+fn draw_polygon_outline(
+    canvas: &mut RgbaImage,
+    points: &[Point<i32>],
+    color: Rgba<u8>,
+    thickness: i32,
+) {
+    if points.len() < 2 {
+        return;
+    }
+
+    for index in 0..points.len() {
+        let start = points[index];
+        let end = points[(index + 1) % points.len()];
+        draw_thick_line(
+            canvas,
+            (start.x as f32, start.y as f32),
+            (end.x as f32, end.y as f32),
+            color,
+            thickness.max(1),
+        );
+    }
+}
+
+fn lerp_i32_point(a: Point<i32>, b: Point<i32>, t: f32) -> Point<i32> {
+    Point::new(
+        (a.x as f32 + (b.x - a.x) as f32 * t).round() as i32,
+        (a.y as f32 + (b.y - a.y) as f32 * t).round() as i32,
+    )
+}
+
 fn line_endpoints(drawable: &RenderDrawable) -> (f32, f32, f32, f32) {
     let x1 = drawable.x;
     let y1 = drawable.y;
@@ -1237,16 +1473,36 @@ fn rect_from_points(x1: f32, y1: f32, x2: f32, y2: f32) -> Option<Rect> {
     Some(Rect::at(left, top).of_size(width.max(1), height.max(1)))
 }
 
-fn measure_text(text: &str, scale: u32) -> (u32, u32) {
+fn measure_text(text: &str, scale: f32) -> (u32, u32) {
     if text.is_empty() {
         return (0, 0);
     }
-    let glyph_w = 8 * scale;
-    let glyph_h = 8 * scale;
-    let spacing = scale;
-    let count = text.chars().count() as u32;
-    let width = count * glyph_w + (count.saturating_sub(1) * spacing);
-    (width, glyph_h)
+
+    text_size(PxScale::from(scale), export_font(), text)
+}
+
+fn render_scale_for_canvas(canvas: &RgbaImage) -> f32 {
+    (canvas.width() as f32 / LOGICAL_RENDER_WIDTH as f32).max(1.0)
+}
+
+fn scaled_length(canvas: &RgbaImage, value: f32) -> f32 {
+    value * render_scale_for_canvas(canvas)
+}
+
+fn scaled_thickness(canvas: &RgbaImage, value: i32) -> i32 {
+    scaled_length(canvas, value as f32).round().max(1.0) as i32
+}
+
+fn scaled_radius(canvas: &RgbaImage, value: i32) -> i32 {
+    scaled_length(canvas, value as f32).round().max(1.0) as i32
+}
+
+fn scaled_padding(canvas: &RgbaImage, value: i32) -> i32 {
+    scaled_length(canvas, value as f32).round().max(1.0) as i32
+}
+
+fn scaled_font_size(canvas: &RgbaImage, value: f32) -> f32 {
+    scaled_length(canvas, value).max(1.0)
 }
 
 fn draw_centered_text(
@@ -1254,7 +1510,7 @@ fn draw_centered_text(
     text: &str,
     center: (i32, i32),
     color: Rgba<u8>,
-    scale: u32,
+    scale: f32,
 ) {
     let (text_width, text_height) = measure_text(text, scale);
     let x = center.0 - (text_width as i32 / 2);
@@ -1268,38 +1524,17 @@ fn draw_text_bitmap(
     x: i32,
     y: i32,
     color: Rgba<u8>,
-    scale: u32,
+    scale: f32,
 ) {
-    let mut cursor_x = x;
-    let spacing = scale as i32;
-
-    for character in text.chars() {
-        if let Some(glyph) = BASIC_FONTS.get(character) {
-            for (row, bits) in glyph.iter().enumerate() {
-                for column in 0..8 {
-                    let bit_mask = 1_u8 << column;
-                    if (bits & bit_mask) != 0 {
-                        let pixel_x = cursor_x + column as i32 * scale as i32;
-                        let pixel_y = y + row as i32 * scale as i32;
-                        draw_pixel_block(canvas, pixel_x, pixel_y, scale, color);
-                    }
-                }
-            }
-        }
-        cursor_x += (8 * scale) as i32 + spacing;
-    }
+    draw_text_mut(canvas, color, x, y, PxScale::from(scale), export_font(), text);
 }
 
-fn draw_pixel_block(canvas: &mut RgbaImage, x: i32, y: i32, scale: u32, color: Rgba<u8>) {
-    for sy in 0..scale {
-        for sx in 0..scale {
-            let px = x + sx as i32;
-            let py = y + sy as i32;
-            if px >= 0 && py >= 0 && px < canvas.width() as i32 && py < canvas.height() as i32 {
-                canvas.put_pixel(px as u32, py as u32, color);
-            }
-        }
-    }
+fn export_font() -> &'static FontArc {
+    static FONT: OnceLock<FontArc> = OnceLock::new();
+    FONT.get_or_init(|| {
+        FontArc::try_from_slice(EXPORT_FONT_BYTES)
+            .expect("bundled export font should load")
+    })
 }
 
 fn contrasting_text_color(background: Rgba<u8>) -> Rgba<u8> {
@@ -1350,6 +1585,10 @@ fn lerp_color(a: Rgba<u8>, b: Rgba<u8>, t: f32) -> Rgba<u8> {
         mix(a[2], b[2]),
         mix(a[3], b[3]),
     ])
+}
+
+fn with_alpha(color: Rgba<u8>, alpha: u8) -> Rgba<u8> {
+    Rgba([color[0], color[1], color[2], alpha])
 }
 
 fn parse_hex_color(value: Option<&str>, fallback: [u8; 3], opacity: f32) -> Rgba<u8> {

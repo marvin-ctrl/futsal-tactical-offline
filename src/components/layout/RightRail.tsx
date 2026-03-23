@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CourtType, Drawable, ExportJob, ExportType, TacticalProject } from "../../types/domain";
 import type { ActiveSidePanel, ActiveTool } from "../../types/ui";
+import { AWAY_FORMATION_PRESETS, HOME_FORMATION_PRESETS, isTeamDrawable, type FormationPreset } from "../../lib/teamPresets";
 import { getToolLabel } from "../../lib/uiLabels";
 
 interface ExportPresetOption {
@@ -33,6 +34,8 @@ interface RightRailProps {
   sceneNote: string;
   onSelectPanel: (panel: ActiveSidePanel) => void;
   onSetCourtType: (courtType: CourtType) => void;
+  onInsertFormation: (teamId: "home" | "away", formation: FormationPreset) => void;
+  onAssignSelectionTeam: (teamId: "home" | "away") => void;
   onSetExportFormat: (format: ExportType) => void;
   onSetExportPreset: (preset: string) => void;
   onSetSceneDuration: (sceneId: string, durationSeconds: number) => void;
@@ -40,6 +43,7 @@ interface RightRailProps {
   onRefreshExports: () => void;
   onCancelExport: (jobId: string) => void;
   onRetryExport: (jobId: string) => void;
+  onRevealExport: (outputPath: string) => void;
   onUpdateSelectionLabel: (label: string) => void;
   onUpdateSelectionStyle: (changes: { fill?: string; stroke?: string; opacity?: number; dashed?: boolean }) => void;
   onToggleSelectionLocked: () => void;
@@ -76,6 +80,8 @@ export function RightRail({
   sceneNote,
   onSelectPanel,
   onSetCourtType,
+  onInsertFormation,
+  onAssignSelectionTeam,
   onSetExportFormat,
   onSetExportPreset,
   onSetSceneDuration,
@@ -83,6 +89,7 @@ export function RightRail({
   onRefreshExports,
   onCancelExport,
   onRetryExport,
+  onRevealExport,
   onUpdateSelectionLabel,
   onUpdateSelectionStyle,
   onToggleSelectionLocked,
@@ -94,6 +101,7 @@ export function RightRail({
   const exportPresetLabel =
     exportPresetOptions.find((option) => option.value === exportPreset)?.label ?? exportPreset;
   const [sceneDurationDrafts, setSceneDurationDrafts] = useState<Record<string, string>>({});
+  const selectedTeamDrawables = selectedDrawables.filter(isTeamDrawable);
 
   useEffect(() => {
     setSceneDurationDrafts(
@@ -186,6 +194,68 @@ export function RightRail({
                 onClick={() => onSetCourtType("half-defending")}
               >
                 Defend Focus
+              </button>
+            </div>
+          </div>
+          <div className="meta-card">
+            <h3>Formation Presets</h3>
+            <div className="formation-preset-stack">
+              <div className="formation-preset-group">
+                <span>Home Build-Up</span>
+                <div className="button-inline-row">
+                  {HOME_FORMATION_PRESETS.map((formation) => (
+                    <button
+                      key={`home-${formation}`}
+                      type="button"
+                      className="button button--ghost"
+                      onClick={() => onInsertFormation("home", formation)}
+                    >
+                      {formation}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="formation-preset-group">
+                <span>Away Defensive</span>
+                <div className="button-inline-row">
+                  {AWAY_FORMATION_PRESETS.map((formation) => (
+                    <button
+                      key={`away-${formation}`}
+                      type="button"
+                      className="button button--ghost"
+                      onClick={() => onInsertFormation("away", formation)}
+                    >
+                      {formation}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <p>Replacing a shape only swaps that team's players and goalkeeper in the current keyframe.</p>
+          </div>
+          <div className="meta-card">
+            <h3>Selected Team</h3>
+            <p>
+              {selectedTeamDrawables.length === 0
+                ? "Select one or more players or goalkeepers to tag them as home or away."
+                : `Apply home or away team ownership to ${selectedTeamDrawables.length} selected marker${selectedTeamDrawables.length === 1 ? "" : "s"}.`}
+            </p>
+            <div className="button-inline-row">
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => onAssignSelectionTeam("home")}
+                disabled={selectedTeamDrawables.length === 0}
+              >
+                Set Home
+              </button>
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => onAssignSelectionTeam("away")}
+                disabled={selectedTeamDrawables.length === 0}
+              >
+                Set Away
               </button>
             </div>
           </div>
@@ -299,6 +369,11 @@ export function RightRail({
                   {(job.status === "failed" || job.status === "canceled") ? (
                     <button type="button" className="button" onClick={() => onRetryExport(job.id)}>
                       Retry
+                    </button>
+                  ) : null}
+                  {job.status === "succeeded" && job.outputPath ? (
+                    <button type="button" className="button" onClick={() => onRevealExport(job.outputPath!)}>
+                      Reveal in Finder
                     </button>
                   ) : null}
                 </div>

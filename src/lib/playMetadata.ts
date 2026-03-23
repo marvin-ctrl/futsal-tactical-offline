@@ -15,7 +15,7 @@ export const RESTART_TYPE_OPTIONS: RestartType[] = [
   "goalkeeper restart"
 ];
 
-export const SYSTEM_OPTIONS: SystemType[] = ["3-1", "4-0", "2-2", "1-2-1", "other"];
+export const SYSTEM_OPTIONS: SystemType[] = ["3-1", "4-0", "1-1-2", "1-2-1", "other"];
 
 export const AGE_BAND_OPTIONS: AgeBand[] = ["youth", "academy", "senior", "pro"];
 
@@ -32,6 +32,14 @@ export function isRestartType(value: string | null | undefined): value is Restar
 
 export function isSystemType(value: string | null | undefined): value is SystemType {
   return SYSTEM_OPTIONS.includes(value as SystemType);
+}
+
+export function normalizeSystemType(value: string | null | undefined): SystemType | undefined {
+  if (value === "2-2") {
+    return "other";
+  }
+
+  return isSystemType(value) ? value : undefined;
 }
 
 export function isAgeBand(value: string | null | undefined): value is AgeBand {

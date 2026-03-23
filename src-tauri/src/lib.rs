@@ -2,11 +2,14 @@ mod db;
 pub mod models;
 pub mod renderer;
 
-use image::{codecs::jpeg::JpegEncoder, DynamicImage, ExtendedColorType, RgbaImage};
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
+use image::{DynamicImage, RgbaImage};
 use models::{
     ExportJobPayload, ExportRequestPayload, Mp4ExportRequest, ProjectRow, SchemaMigrationRow,
     StaticExportRequest, TacticalProjectPayload,
 };
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -92,6 +95,37 @@ fn retry_export_job(app: AppHandle, job_id: String) -> Result<ExportJobPayload, 
     )?);
 
     queue_export_job(app, request, Some(&job_id))
+}
+
+#[tauri::command]
+fn reveal_export_in_finder(output_path: String) -> Result<String, String> {
+    let trimmed = output_path.trim();
+    if trimmed.is_empty() {
+        return Err("export path is empty".to_string());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.exists() {
+        return Err(format!("export path does not exist: {}", path.display()));
+    }
+
+    let status = Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .status()
+        .map_err(|error| format!("failed to reveal export in Finder: {error}"))?;
+
+    if !status.success() {
+        return Err(format!(
+            "Finder reveal failed with status {}",
+            status
+                .code()
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        ));
+    }
+
+    Ok(path.to_string_lossy().to_string())
 }
 
 fn queue_export_job(
@@ -286,7 +320,7 @@ fn resolve_export_output_path(
     output_file_name: Option<&str>,
     export_type: &str,
 ) -> Result<PathBuf, ExportError> {
-    let mut exports_dir = db::exports_dir(app)?;
+    let mut exports_dir = db::export_output_dir(app)?;
     let extension = output_extension(export_type)?;
     let default_name = format!("{}-{}.{}", project_id, unix_timestamp_millis(), extension);
     let chosen_name = output_file_name
@@ -302,9 +336,10 @@ fn write_frame_pdf(frame: &RgbaImage, output_path: &Path) -> Result<(), ExportEr
     let width = rgb.width();
     let height = rgb.height();
 
-    let mut jpeg_bytes = Vec::new();
-    let mut encoder = JpegEncoder::new_with_quality(&mut jpeg_bytes, 90);
-    encoder.encode(rgb.as_raw(), width, height, ExtendedColorType::Rgb8)?;
+    let mut image_bytes = Vec::new();
+    let mut encoder = ZlibEncoder::new(&mut image_bytes, Compression::best());
+    encoder.write_all(rgb.as_raw())?;
+    encoder.finish()?;
 
     let content_stream = format!("q\n{width} 0 0 {height} 0 0 cm\n/Im0 Do\nQ\n");
     let mut pdf_bytes = Vec::new();
@@ -334,11 +369,11 @@ fn write_frame_pdf(frame: &RgbaImage, output_path: &Path) -> Result<(), ExportEr
     );
 
     let mut image_stream = format!(
-        "<< /Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
-        jpeg_bytes.len()
+        "<< /Type /XObject /Subtype /Image /Width {width} /Height {height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length {} >>\nstream\n",
+        image_bytes.len()
     )
     .into_bytes();
-    image_stream.extend_from_slice(&jpeg_bytes);
+    image_stream.extend_from_slice(&image_bytes);
     image_stream.extend_from_slice(b"\nendstream");
     write_pdf_object(&mut pdf_bytes, &mut offsets, 4, image_stream);
 
@@ -712,7 +747,8 @@ pub fn run() {
             enqueue_mp4_export,
             enqueue_png_export,
             enqueue_pdf_export,
-            retry_export_job
+            retry_export_job,
+            reveal_export_in_finder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -741,6 +777,8 @@ mod tests {
         write_frame_pdf(&frame, &output_path).expect("pdf export should succeed");
         let pdf_bytes = fs::read(&output_path).expect("pdf should be readable");
         assert!(pdf_bytes.starts_with(b"%PDF-1.4"));
+        assert!(pdf_bytes.windows("/FlateDecode".len()).any(|window| window == b"/FlateDecode"));
+        assert!(!pdf_bytes.windows("/DCTDecode".len()).any(|window| window == b"/DCTDecode"));
 
         let _ = fs::remove_file(output_path);
     }

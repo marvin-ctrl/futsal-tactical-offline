@@ -36,6 +36,7 @@ export const defaultProject: TacticalProject = {
         p1: {
           id: "p1",
           type: "player",
+          teamId: "home",
           x: 120,
           y: 240,
           rotation: 0,
@@ -120,6 +121,7 @@ export const defaultProject: TacticalProject = {
         p1: {
           id: "p1",
           type: "player",
+          teamId: "home",
           x: 420,
           y: 220,
           rotation: 15,

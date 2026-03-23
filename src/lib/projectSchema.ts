@@ -5,7 +5,7 @@ import {
   isAgeBand,
   isPlayCategory,
   isRestartType,
-  isSystemType,
+  normalizeSystemType,
   sanitizeTags
 } from "./playMetadata";
 import { sampleTimelineAt } from "./timeline";
@@ -50,7 +50,7 @@ export function normalizeProject(project: TacticalProject, schemaVersion = CURRE
       description: project.meta.description?.trim() ?? "",
       category: isPlayCategory(project.meta.category) ? project.meta.category : DEFAULT_PLAY_CATEGORY,
       restartType: isRestartType(project.meta.restartType) ? project.meta.restartType : DEFAULT_RESTART_TYPE,
-      system: isSystemType(project.meta.system) ? project.meta.system : undefined,
+      system: normalizeSystemType(project.meta.system),
       ageBand: isAgeBand(project.meta.ageBand) ? project.meta.ageBand : undefined,
       tags: sanitizeTags(project.meta.tags),
       sourceTemplateId: project.meta.sourceTemplateId ?? null,
@@ -61,7 +61,18 @@ export function normalizeProject(project: TacticalProject, schemaVersion = CURRE
     },
     keyframes: project.keyframes.map((keyframe) => ({
       ...keyframe,
-      drawableState: cloneDrawableState(keyframe.drawableState)
+      drawableState: Object.fromEntries(
+        Object.entries(cloneDrawableState(keyframe.drawableState)).map(([id, drawable]) => [
+          id,
+          drawable.type === "player" || drawable.type === "goalkeeper"
+            ? {
+                ...drawable,
+                teamId:
+                  drawable.teamId === "home" || drawable.teamId === "away" ? drawable.teamId : undefined
+              }
+            : drawable
+        ])
+      )
     }))
   };
 }

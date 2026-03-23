@@ -1,4 +1,5 @@
 import { createId } from "./projectSchema";
+import { buildTeamStyle } from "./teamPresets";
 import type { Drawable, DrawableType, UUID } from "../types/domain";
 import type { ActiveTool } from "../types/ui";
 
@@ -19,8 +20,8 @@ const LABEL_HORIZONTAL_PADDING = 12;
 const CIRCLE_HIT_PADDING = 4;
 const LINE_HIT_DISTANCE = 10;
 const PLAYER_DIAMETER = 24;
-const BALL_DIAMETER = 10;
-const CONE_DIAMETER = 12;
+const BALL_DIAMETER = 12;
+const CONE_DIAMETER = 14;
 
 export const MIN_DRAW_DISTANCE = 6;
 export const MOVE_THRESHOLD = 3;
@@ -295,18 +296,14 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
       return {
         id,
         type,
+        teamId: "home",
         x: point.x,
         y: point.y,
         rotation: 0,
         width: PLAYER_DIAMETER,
         height: PLAYER_DIAMETER,
         label: "GK",
-        style: {
-          stroke: "#08131f",
-          fill: "#ff6b6b",
-          strokeWidth: 2,
-          opacity: 1
-        }
+        style: buildTeamStyle("home")
       };
     case "ball":
       return {
@@ -320,7 +317,7 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
         style: {
           stroke: "#0f172a",
           fill: "#f8fafc",
-          strokeWidth: 1,
+          strokeWidth: 2,
           opacity: 1
         }
       };
@@ -334,8 +331,8 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
         width: CONE_DIAMETER,
         height: CONE_DIAMETER,
         style: {
-          stroke: "#8a4b08",
-          fill: "#ff9f1c",
+          stroke: "#7a3f09",
+          fill: "#ff9a1f",
           strokeWidth: 2,
           opacity: 1
         }
@@ -414,18 +411,14 @@ function baseDrawable(type: DrawableType, point: Point, explicitId?: string): Dr
       return {
         id,
         type: type === "player" ? "player" : "player",
+        teamId: "home",
         x: point.x,
         y: point.y,
         rotation: 0,
         width: PLAYER_DIAMETER,
         height: PLAYER_DIAMETER,
         label: "P",
-        style: {
-          stroke: "#08131f",
-          fill: "#0f2b63",
-          strokeWidth: 2,
-          opacity: 1
-        }
+        style: buildTeamStyle("home")
       };
   }
 }

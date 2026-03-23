@@ -8,11 +8,13 @@ export type PlayCategory =
 
 export type RestartType = "corner" | "kick-in" | "free kick" | "goalkeeper restart" | "none";
 
-export type SystemType = "3-1" | "4-0" | "2-2" | "1-2-1" | "other";
+export type SystemType = "3-1" | "4-0" | "1-1-2" | "1-2-1" | "other";
 
 export type AgeBand = "youth" | "academy" | "senior" | "pro";
 
 export type CourtType = "full" | "half-attacking" | "half-defending";
+
+export type TeamId = "home" | "away";
 
 export type ExportType = "png" | "pdf" | "mp4";
 
@@ -53,6 +55,7 @@ export interface DrawableStyle {
 export interface Drawable {
   id: UUID;
   type: DrawableType;
+  teamId?: TeamId;
   x: number;
   y: number;
   x2?: number;

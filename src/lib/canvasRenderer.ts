@@ -38,7 +38,8 @@ const LOGICAL_HEIGHT = 500;
 const HALF_FRAME_WIDTH = 980;
 const HALF_FRAME_HEIGHT = 1040;
 const PLAYER_DIAMETER = 24;
-const BALL_DIAMETER = 10;
+const BALL_DIAMETER = 12;
+const CONE_DIAMETER = 14;
 const DRIBBLE_STROKE = "#f4d35e";
 
 export function drawTacticalFrame(
@@ -339,14 +340,29 @@ function drawConnection(context: CanvasRenderingContext2D, drawable: Drawable, w
   const endX = drawable.x2 ?? drawable.x + (drawable.width ?? 0);
   const endY = drawable.y2 ?? drawable.y + (drawable.height ?? 0);
   const color = toRgba(drawable.style.stroke, drawable.style.opacity);
+  const isDribble = isDribbleStyle(drawable);
 
-  if (isDribbleStyle(drawable)) {
-    drawWavyLine(context, startX, startY, endX, endY, color, Math.max(3, drawable.style.strokeWidth));
+  if (isDribble) {
+    const accentColor = toRgba(blendHex(drawable.style.stroke, "#261708", 0.72), drawable.style.opacity * 0.72);
+    const points = buildDribbleWavePoints(startX, startY, endX, endY, Math.max(3, drawable.style.strokeWidth));
+    drawPolyline(context, points, accentColor, drawable.style.strokeWidth + 2);
+    drawPolyline(context, points, color, Math.max(3, drawable.style.strokeWidth));
   } else {
     drawLine(context, startX, startY, endX, endY, color, drawable.style.strokeWidth, Boolean(drawable.style.dashed));
   }
 
   if (withArrowHead) {
+    if (isDribble) {
+      drawArrowHead(
+        context,
+        startX,
+        startY,
+        endX,
+        endY,
+        toRgba(blendHex(drawable.style.stroke, "#261708", 0.72), drawable.style.opacity * 0.72),
+        drawable.style.strokeWidth + 2
+      );
+    }
     drawArrowHead(context, startX, startY, endX, endY, color, drawable.style.strokeWidth);
   }
 
@@ -384,23 +400,48 @@ function drawPlayer(context: CanvasRenderingContext2D, drawable: Drawable, isGoa
 
 function drawBall(context: CanvasRenderingContext2D, drawable: Drawable): void {
   const radius = resolveBallRadius(drawable);
-  const seamColor = toRgba("#0f172a", drawable.style.opacity);
-  const fillColor = toRgba("#f8fafc", drawable.style.opacity);
+  const seamColor = toRgba("#162334", drawable.style.opacity);
+  const fillColor = toRgba("#fbfdff", drawable.style.opacity);
+  const ringThickness = Math.max(2, drawable.style.strokeWidth);
+  const pentagon = buildRegularPolygonPoints(drawable.x, drawable.y, Math.max(1.5, radius * 0.34), 5, -Math.PI * 0.5);
+  fillCircle(context, drawable.x + radius * 0.18, drawable.y + radius * 0.16, radius, toRgba("#08131f", drawable.style.opacity * 0.14));
   fillCircle(context, drawable.x, drawable.y, radius, fillColor);
-  strokeCircle(context, drawable.x, drawable.y, radius, seamColor, Math.max(1, drawable.style.strokeWidth));
-  drawArc(context, drawable.x - radius * 0.12, drawable.y, radius * 0.5, 80, 280, seamColor, 1);
-  drawArc(context, drawable.x + radius * 0.12, drawable.y, radius * 0.5, -100, 100, seamColor, 1);
-  drawLine(context, drawable.x - radius * 0.18, drawable.y - radius * 0.48, drawable.x + radius * 0.18, drawable.y + radius * 0.48, seamColor, 1, false);
+  strokeCircle(context, drawable.x, drawable.y, radius, seamColor, ringThickness);
+  fillPolygon(context, pentagon, seamColor);
+  if (radius >= 5) {
+    for (const point of pentagon) {
+      const angle = Math.atan2(point.y - drawable.y, point.x - drawable.x);
+      const seamStartX = drawable.x + Math.cos(angle) * radius * 0.46;
+      const seamStartY = drawable.y + Math.sin(angle) * radius * 0.46;
+      const seamEndX = drawable.x + Math.cos(angle) * radius * 0.83;
+      const seamEndY = drawable.y + Math.sin(angle) * radius * 0.83;
+      drawLine(context, seamStartX, seamStartY, seamEndX, seamEndY, seamColor, Math.max(1.5, radius * 0.16), false);
+    }
+  }
+  fillCircle(
+    context,
+    drawable.x - radius * 0.28,
+    drawable.y - radius * 0.26,
+    Math.max(1, radius * 0.16),
+    toRgba("#ffffff", drawable.style.opacity * 0.85)
+  );
 }
 
 function drawCone(context: CanvasRenderingContext2D, drawable: Drawable): void {
-  const size = Math.max(drawable.width ?? 10, drawable.height ?? 10, 10);
-  const left = drawable.x - size * 0.5;
-  const top = drawable.y - size * 0.5;
+  const size = Math.max(drawable.width ?? CONE_DIAMETER, drawable.height ?? CONE_DIAMETER, CONE_DIAMETER);
+  const height = size * 1.18;
+  const body = buildConeBodyPoints(drawable.x, drawable.y, size, height);
+  const band = buildConeBandPoints(body, 0.58, 0.8);
+  const highlight = buildConeHighlightPoints(drawable.x, drawable.y, size, height);
+  const fill = toRgba(drawable.style.fill, drawable.style.opacity);
+  const outline = toRgba(drawable.style.stroke, drawable.style.opacity);
+  const bandFill = toRgba(blendHex(drawable.style.fill, "#9a4d10", 0.45), drawable.style.opacity);
+  const highlightFill = toRgba(blendHex(drawable.style.fill, "#fff2c7", 0.32), drawable.style.opacity * 0.92);
 
-  context.fillStyle = toRgba(drawable.style.fill, drawable.style.opacity);
-  context.fillRect(left, top, size, size);
-  strokeRect(context, left, top, size, size, toRgba(drawable.style.stroke, drawable.style.opacity), drawable.style.strokeWidth);
+  fillPolygon(context, body, fill);
+  fillPolygon(context, highlight, highlightFill);
+  fillPolygon(context, band, bandFill);
+  drawPolyline(context, [...body, body[0]], outline, Math.max(1, drawable.style.strokeWidth));
 }
 
 function drawLabelTag(context: CanvasRenderingContext2D, drawable: Drawable): void {
@@ -487,43 +528,7 @@ function drawWavyLine(
   color: string,
   thickness: number
 ): void {
-  const distance = Math.hypot(endX - startX, endY - startY);
-  if (distance === 0) {
-    return;
-  }
-
-  const unitX = (endX - startX) / distance;
-  const unitY = (endY - startY) / distance;
-  const normalX = -unitY;
-  const normalY = unitX;
-  const amplitude = Math.max(5, thickness * 1.8);
-  const wavelength = 28;
-  const cycles = Math.max(1.5, distance / wavelength);
-  const steps = Math.max(16, Math.ceil(distance / 8));
-
-  context.save();
-  context.strokeStyle = color;
-  context.lineWidth = thickness;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.beginPath();
-
-  for (let step = 0; step <= steps; step += 1) {
-    const t = step / steps;
-    const baseX = startX + unitX * distance * t;
-    const baseY = startY + unitY * distance * t;
-    const offset = Math.sin(t * Math.PI * 2 * cycles) * amplitude;
-    const waveX = baseX + normalX * offset;
-    const waveY = baseY + normalY * offset;
-    if (step === 0) {
-      context.moveTo(waveX, waveY);
-    } else {
-      context.lineTo(waveX, waveY);
-    }
-  }
-
-  context.stroke();
-  context.restore();
+  drawPolyline(context, buildDribbleWavePoints(startX, startY, endX, endY, thickness), color, thickness);
 }
 
 function drawArrowHead(
@@ -547,6 +552,134 @@ function drawArrowHead(
   context.closePath();
   context.fill();
   context.restore();
+}
+
+function drawPolyline(
+  context: CanvasRenderingContext2D,
+  points: FramePoint[],
+  color: string,
+  thickness: number
+): void {
+  if (points.length < 2) {
+    return;
+  }
+
+  context.save();
+  context.strokeStyle = color;
+  context.lineWidth = thickness;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    context.lineTo(points[index].x, points[index].y);
+  }
+  context.stroke();
+  context.restore();
+}
+
+function fillPolygon(context: CanvasRenderingContext2D, points: FramePoint[], color: string): void {
+  if (points.length < 3) {
+    return;
+  }
+
+  context.save();
+  context.fillStyle = color;
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    context.lineTo(points[index].x, points[index].y);
+  }
+  context.closePath();
+  context.fill();
+  context.restore();
+}
+
+function buildDribbleWavePoints(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  thickness: number
+): FramePoint[] {
+  const distance = Math.hypot(endX - startX, endY - startY);
+  if (distance === 0) {
+    return [];
+  }
+
+  const unitX = (endX - startX) / distance;
+  const unitY = (endY - startY) / distance;
+  const normalX = -unitY;
+  const normalY = unitX;
+  const amplitude = Math.min(6.25, Math.max(3.25, thickness * 1.15)) * Math.min(1, Math.max(0.7, distance / 42));
+  const cycles = Math.min(4.25, Math.max(1.15, distance / 48));
+  const steps = Math.max(18, Math.ceil(distance / 6));
+  const points: FramePoint[] = [];
+
+  for (let step = 0; step <= steps; step += 1) {
+    const t = step / steps;
+    const baseX = startX + unitX * distance * t;
+    const baseY = startY + unitY * distance * t;
+    const envelope = Math.pow(Math.sin(Math.PI * t), 0.85);
+    const offset = Math.sin(t * Math.PI * 2 * cycles) * amplitude * envelope;
+    points.push({
+      x: baseX + normalX * offset,
+      y: baseY + normalY * offset
+    });
+  }
+
+  return points;
+}
+
+function buildRegularPolygonPoints(
+  centerX: number,
+  centerY: number,
+  radius: number,
+  sides: number,
+  startAngleRad: number
+): FramePoint[] {
+  const points: FramePoint[] = [];
+  for (let index = 0; index < sides; index += 1) {
+    const angle = startAngleRad + (Math.PI * 2 * index) / sides;
+    points.push({
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius
+    });
+  }
+  return points;
+}
+
+function buildConeBodyPoints(centerX: number, centerY: number, size: number, height: number): FramePoint[] {
+  return [
+    { x: centerX - size * 0.18, y: centerY - height * 0.46 },
+    { x: centerX + size * 0.18, y: centerY - height * 0.46 },
+    { x: centerX + size * 0.46, y: centerY + height * 0.42 },
+    { x: centerX - size * 0.46, y: centerY + height * 0.42 }
+  ];
+}
+
+function buildConeBandPoints(body: FramePoint[], startT: number, endT: number): FramePoint[] {
+  const topLeft = lerpPoint(body[0], body[3], startT);
+  const topRight = lerpPoint(body[1], body[2], startT);
+  const bottomRight = lerpPoint(body[1], body[2], endT);
+  const bottomLeft = lerpPoint(body[0], body[3], endT);
+  return [topLeft, topRight, bottomRight, bottomLeft];
+}
+
+function buildConeHighlightPoints(centerX: number, centerY: number, size: number, height: number): FramePoint[] {
+  return [
+    { x: centerX - size * 0.12, y: centerY - height * 0.22 },
+    { x: centerX - size * 0.01, y: centerY - height * 0.1 },
+    { x: centerX + size * 0.08, y: centerY + height * 0.12 },
+    { x: centerX - size * 0.02, y: centerY + height * 0.26 }
+  ];
+}
+
+function lerpPoint(a: FramePoint, b: FramePoint, t: number): FramePoint {
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t
+  };
 }
 
 function strokeRect(
@@ -629,7 +762,7 @@ function resolvePlayerRadius(drawable: Drawable): number {
 }
 
 function resolveBallRadius(drawable: Drawable): number {
-  return Math.max(4, Math.min(Math.max(drawable.width ?? BALL_DIAMETER, drawable.height ?? BALL_DIAMETER) * 0.5, 6));
+  return Math.max(5, Math.min(Math.max(drawable.width ?? BALL_DIAMETER, drawable.height ?? BALL_DIAMETER) * 0.5, 7));
 }
 
 function toRgba(hex: string, opacity: number): string {

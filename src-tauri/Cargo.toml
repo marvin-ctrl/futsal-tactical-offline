@@ -14,7 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-font8x8 = "0.3"
+ab_glyph = "0.2"
+flate2 = "1"
 image = "0.25"
 imageproc = "0.25"
 rusqlite = { version = "0.32", features = ["bundled"] }

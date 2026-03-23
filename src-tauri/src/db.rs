@@ -54,6 +54,16 @@ pub fn exports_dir(app: &AppHandle) -> Result<PathBuf, DbError> {
     Ok(dir)
 }
 
+pub fn export_output_dir(app: &AppHandle) -> Result<PathBuf, DbError> {
+    let resolver = app.path();
+    let dir = match resolver.download_dir() {
+        Ok(path) => path,
+        Err(_) => exports_dir(app)?,
+    };
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
 fn connect(app: &AppHandle) -> Result<Connection, DbError> {
     let path = db_path(app)?;
     Connection::open(path).map_err(DbError::from)
@@ -132,6 +142,7 @@ fn ensure_project_metadata_schema(connection: &Connection) -> Result<(), DbError
          SET description = COALESCE(description, ''),
              category = COALESCE(category, 'attacking pattern'),
              restart_type = COALESCE(restart_type, 'none'),
+             system = CASE WHEN system = '2-2' THEN 'other' ELSE system END,
              tags_json = COALESCE(tags_json, '[]')",
         [],
     )?;
@@ -370,7 +381,7 @@ fn is_valid_restart_type(value: &str) -> bool {
 }
 
 fn is_valid_system(value: &str) -> bool {
-    matches!(value, "3-1" | "4-0" | "2-2" | "1-2-1" | "other")
+    matches!(value, "3-1" | "4-0" | "1-1-2" | "1-2-1" | "other")
 }
 
 fn is_valid_age_band(value: &str) -> bool {

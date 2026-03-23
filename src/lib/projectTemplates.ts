@@ -1,5 +1,6 @@
 import type { CourtType, Drawable, DrawableStyle, PlayCategory, RestartType, SystemType, TacticalProject } from "../types/domain";
 import { createId, CURRENT_SCHEMA_VERSION } from "./projectSchema";
+import { createTeamPlayer } from "./teamPresets";
 
 export interface PlayTemplateDefinition {
   id: string;
@@ -14,10 +15,6 @@ export interface PlayTemplateDefinition {
   buildDrawables: () => Drawable[];
 }
 
-const ATTACK_FILL = "#d62828";
-const ATTACK_STROKE = "#7f1d1d";
-const DEFEND_FILL = "#2563eb";
-const DEFEND_STROKE = "#1d4ed8";
 const BALL_FILL = "#f8fafc";
 const BALL_STROKE = "#0f172a";
 const ARROW_FILL = "#84e4ff";
@@ -43,15 +40,8 @@ const createPlayer = (
   y: number,
   variant: "attack" | "defend" = "attack",
   type: "player" | "goalkeeper" = "player"
-): Drawable => ({
-  id: createId(type),
-  type,
-  x,
-  y,
-  rotation: 0,
-  label,
-  style: variant === "attack" ? createStyle(ATTACK_FILL, ATTACK_STROKE) : createStyle(DEFEND_FILL, DEFEND_STROKE)
-});
+): Drawable =>
+  createTeamPlayer(label, x, y, variant === "attack" ? "home" : "away", type);
 
 const createBall = (x: number, y: number): Drawable => ({
   id: createId("ball"),
@@ -178,7 +168,7 @@ export const PLAY_TEMPLATES: PlayTemplateDefinition[] = [
     description: "Central free kick with a screen to isolate the shooter lane.",
     category: "set piece",
     restartType: "free kick",
-    system: "2-2",
+    system: "1-2-1",
     ageBand: "senior",
     courtType: "half-attacking",
     tags: ["free kick", "screen"],

@@ -22,10 +22,12 @@ import {
 import { readBrowserStorage, writeBrowserStorage } from "./lib/browserStorage";
 import { defaultProject } from "./lib/defaultProject";
 import { queueExportWithLatestProject } from "./lib/exportFlow";
+import { normalizeSystemType } from "./lib/playMetadata";
 import { cacheProjectThumbnail, readProjectThumbnail, removeProjectThumbnail } from "./lib/projectThumbnail";
 import { downloadProjectPackage, parseProjectPackage } from "./lib/projectPackage";
 import { cloneDrawableState, createId, CURRENT_SCHEMA_VERSION, migrateProjectToCurrent } from "./lib/projectSchema";
 import { createProjectFromTemplate, PLAY_TEMPLATES } from "./lib/projectTemplates";
+import { assignDrawableToTeam, buildFormationDrawables, isTeamDrawable, type FormationPreset } from "./lib/teamPresets";
 import { sampleTimelineAt, timelineSanityIssues } from "./lib/timeline";
 import { getCourtTypeLabel, getDrawableTypeLabel } from "./lib/uiLabels";
 import { useEditorState } from "./state/useEditorState";
@@ -40,7 +42,8 @@ import type {
   ProjectMeta,
   ProjectRow,
   StaticExportRequest,
-  TacticalProject
+  TacticalProject,
+  TeamId
 } from "./types/domain";
 import type { AppView } from "./types/ui";
 
@@ -52,7 +55,7 @@ const PROJECT_FALLBACK_ROW = (project: TacticalProject): ProjectRow => ({
   description: project.meta.description,
   category: project.meta.category,
   restartType: project.meta.restartType,
-  system: project.meta.system,
+  system: normalizeSystemType(project.meta.system),
   ageBand: project.meta.ageBand,
   tags: project.meta.tags,
   sceneCount: project.scenes.length,
@@ -333,7 +336,12 @@ export function App() {
   const refreshProjects = async () => {
     try {
       const rows = await invoke<ProjectRow[]>("list_projects");
-      setProjectRows(rows);
+      setProjectRows(
+        rows.map((row) => ({
+          ...row,
+          system: normalizeSystemType(row.system)
+        }))
+      );
     } catch {
       setProjectRows([PROJECT_FALLBACK_ROW(project)]);
     }
@@ -549,6 +557,15 @@ export function App() {
     }
   };
 
+  const revealExportInFinder = async (outputPath: string) => {
+    try {
+      await invoke<string>("reveal_export_in_finder", { outputPath });
+      setExportStatus("revealed in Finder");
+    } catch {
+      setExportStatus("reveal unavailable in web mode");
+    }
+  };
+
   const setCourtType = (courtType: CourtType) => {
     setProject({
       ...project,
@@ -694,15 +711,77 @@ export function App() {
   };
 
   const updateProjectMeta = (changes: Partial<ProjectMeta>) => {
+    const nextSystem = Object.prototype.hasOwnProperty.call(changes, "system")
+      ? normalizeSystemType(changes.system)
+      : project.meta.system;
+
     setProject({
       ...project,
       meta: {
         ...project.meta,
         ...changes,
+        system: nextSystem,
         updatedAt: new Date().toISOString()
       }
     });
     setPersistStatus("metadata updated locally");
+  };
+
+  const assignSelectionTeam = (teamId: TeamId) => {
+    const teamableDrawables = selectedDrawables.filter(isTeamDrawable);
+    if (teamableDrawables.length === 0) {
+      return;
+    }
+
+    updateSelectedDrawables(
+      teamableDrawables.map((drawable) => {
+        const nextDrawable = assignDrawableToTeam(drawable, teamId);
+        return {
+          id: drawable.id,
+          changes: {
+            teamId: nextDrawable.teamId,
+            style: nextDrawable.style
+          }
+        };
+      }),
+      `set ${teamId} team`
+    );
+    setPersistStatus(`${teamId} team applied locally`);
+  };
+
+  const insertFormationPreset = (teamId: TeamId, formation: FormationPreset) => {
+    const nextDrawableState = Object.fromEntries(
+      sampledState.drawables.map((drawable) => [
+        drawable.id,
+        {
+          ...drawable,
+          style: { ...drawable.style }
+        }
+      ])
+    );
+
+    Object.entries(nextDrawableState).forEach(([drawableId, drawable]) => {
+      if (isTeamDrawable(drawable) && drawable.teamId === teamId) {
+        delete nextDrawableState[drawableId];
+      }
+    });
+
+    const formationDrawables = buildFormationDrawables(teamId, formation);
+    formationDrawables.forEach((drawable) => {
+      nextDrawableState[drawable.id] = drawable;
+    });
+
+    applyCommand(
+      {
+        type: "setDrawableState",
+        drawableState: nextDrawableState
+      },
+      {
+        label: `insert ${teamId} ${formation}`,
+        selectionIds: formationDrawables.map((drawable) => drawable.id)
+      }
+    );
+    setPersistStatus(`${teamId} ${formation} inserted locally`);
   };
 
   const saveProjectAs = async (nextName: string) => {
@@ -1297,6 +1376,8 @@ export function App() {
           sceneNote={sceneNote}
           onSelectPanel={setSidePanel}
           onSetCourtType={setCourtType}
+          onInsertFormation={insertFormationPreset}
+          onAssignSelectionTeam={assignSelectionTeam}
           onSetExportFormat={setExportFormatAndSyncPreset}
           onSetExportPreset={setExportPresetForFormat}
           onSetSceneDuration={setSceneDuration}
@@ -1304,6 +1385,7 @@ export function App() {
           onRefreshExports={refreshExportJobs}
           onCancelExport={cancelExportJob}
           onRetryExport={retryExportJob}
+          onRevealExport={revealExportInFinder}
           onUpdateSelectionLabel={updateSelectionLabel}
           onUpdateSelectionStyle={updateSelectionStyle}
           onToggleSelectionLocked={toggleSelectionLocked}

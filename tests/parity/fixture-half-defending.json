@@ -104,6 +104,24 @@
             "dashed": false
           }
         },
+        "dribble1": {
+          "id": "dribble1",
+          "type": "arrow",
+          "x": 178,
+          "y": 330,
+          "x2": 346,
+          "y2": 220,
+          "rotation": 0,
+          "width": 168,
+          "height": -110,
+          "style": {
+            "stroke": "#f4d35e",
+            "fill": "#f4d35e",
+            "strokeWidth": 4,
+            "opacity": 0.95,
+            "dashed": false
+          }
+        },
         "zone1": {
           "id": "zone1",
           "type": "zone",
@@ -200,6 +218,24 @@
             "fill": "#0ea5e9",
             "strokeWidth": 2,
             "opacity": 0.8,
+            "dashed": false
+          }
+        },
+        "dribble1": {
+          "id": "dribble1",
+          "type": "arrow",
+          "x": 210,
+          "y": 316,
+          "x2": 392,
+          "y2": 172,
+          "rotation": 0,
+          "width": 182,
+          "height": -144,
+          "style": {
+            "stroke": "#f4d35e",
+            "fill": "#f4d35e",
+            "strokeWidth": 4,
+            "opacity": 0.95,
             "dashed": false
           }
         },
